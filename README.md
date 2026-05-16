@@ -1,28 +1,217 @@
-This project was developed with Claude Code.
-# DirText
+# DirText v3.5
 
-A lightweight, beautiful and fast directory tree export tool.
+[![Release](https://img.shields.io/github/v/release/zcy83821448/DirText)](https://github.com/zcy83821448/DirText/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)](https://github.com/zcy83821448/DirText)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-### Features
-- Support adding multiple folders at once
-- Clean tree-style output
-- Flexible recursion depth control (Current / 1-3 levels / All)
-- Auto-detect folder path from clipboard
-- Automatic English/Chinese language detection
-- Non-blocking UI with multi-threaded scanning
-- One-click export to TXT
+> **English** | [中文说明](#中文说明)
 
-### Download
-[Download Latest Version (DirText.exe)](https://github.com/zcy83821448/DirText/releases)
+A lightweight Windows GUI tool that scans folder structures and exports them as **TXT tree text**, **CSV table**, or **JSON structured data**.
 
-### How to Use
-1. Run DirText.exe
-2. Click "Add Folder" to select folders
-3. Choose recursion depth
-4. Preview the result
-5. Click "Export" to save as TXT file
+Built with PyQt6. Auto-detects system language (English / Chinese). No installation required.
 
-### Run from Source
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| 📁 **Multi-folder Selection** | Add multiple folders via the built-in directory tree dialog (Ctrl+click multi-select) |
+| 🖱️ **Drag & Drop** | Drag any folder directly into the window — auto-scans on drop |
+| 📋 **Clipboard Auto-detect** | Automatically recognizes valid folder paths copied to clipboard on startup |
+| 🔍 **Recursion Depth Control** | Free text input for recursion depth. `0` = current level only, `-1` = all levels. 1-second debounce auto-scan |
+| 💾 **Export Format Selection** | Choose between **TXT** (tree text), **CSV** (table), **JSON** (structured data) before saving |
+| 🌐 **Auto Bilingual UI** | Interface automatically switches between English and Chinese based on system locale |
+| ⚡ **Real-time Preview** | Live preview of directory tree while scanning |
+
+---
+
+## 📥 Download
+
+1. Go to [Releases](https://github.com/zcy83821448/DirText/releases)
+2. Download `DirText.exe`
+3. Double-click to run — **no installation required**
+
+> ⚠️ Windows may show a SmartScreen warning because the `.exe` is not code-signed. Click **"More info" → "Run anyway"** to proceed.
+
+---
+
+## 🚀 Quick Start
+
+1. **Launch** `DirText.exe`
+2. **Add folders** by one of these methods:
+   - Click **"Add Folder"** and select in the dialog
+   - **Drag & drop** a folder into the window
+   - Copy a folder path to clipboard before launch — it will auto-detect
+3. **Set recursion depth** in the text field (default `0` = current level)
+4. **Preview** the generated tree in real-time
+5. Click **"Export"** → choose **TXT / CSV / JSON** → save with auto-generated timestamp
+
+---
+
+## 🖼️ Screenshots
+
+> *(Drag and drop screenshot images here in the GitHub editor to upload)*
+
+---
+
+## 🛠️ Build from Source
+
 ```bash
+# 1. Clone the repository
+git clone https://github.com/zcy83821448/DirText.git
+cd DirText
+
+# 2. Install dependencies
 pip install -r requirements.txt
+
+# 3. Run
 python dirtext.py
+```
+
+### Build executable (optional)
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --icon=app.ico dirtext.py
+```
+
+---
+
+## 📝 Changelog
+
+### v3.5
+- **Export Format Selection** — Choose TXT, CSV, or JSON before saving
+- **Drag & Drop Support** — Drop folders anywhere in the window to auto-scan
+- **Free Recursion Input** — Replaced dropdown with text input + 1s debounce auto-scan
+- **Updated Welcome Page** — Added usage instructions for new features
+
+### v3.0
+- Multi-folder selection dialog
+- Clipboard path auto-detection
+- Recursive depth control (dropdown)
+- Auto English/Chinese UI switching
+- One-click export to `.txt`
+
+---
+
+## 🏷️ Keywords / Tags
+
+`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `json-export` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop`
+
+---
+
+## 📄 License
+
+[MIT](LICENSE)
+
+---
+
+---
+
+<a name="中文说明"></a>
+
+# DirText v3.5 中文说明
+
+轻量级 Windows GUI 工具，扫描文件夹结构并导出为 **TXT 树形文本**、**CSV 表格** 或 **JSON 结构化数据**。
+
+基于 PyQt6 构建，自动识别系统语言（英文/中文），无需安装，即开即用。
+
+---
+
+## ✨ 功能特性
+
+| 功能 | 说明 |
+|------|------|
+| 📁 **多文件夹选择** | 内置目录树对话框，支持 Ctrl+单击 多选 |
+| 🖱️ **拖拽支持** | 直接将文件夹拖入窗口任意区域，松开后自动添加并扫描 |
+| 📋 **剪贴板自动识别** | 启动时自动检测剪贴板中的有效文件夹路径 |
+| 🔍 **递归深度自由输入** | 文本框输入递归层数，`0` = 仅当前层，`-1` = 全部层级，输入停止后 1 秒自动触发扫描 |
+| 💾 **导出格式选择** | 导出前可选择 **TXT**（树形文本）、**CSV**（表格）、**JSON**（结构化数据） |
+| 🌐 **自动双语界面** | 根据系统区域设置自动切换英文/中文界面 |
+| ⚡ **实时预览** | 扫描过程中实时预览目录树结构 |
+
+---
+
+## 📥 下载
+
+1. 进入 [Releases](https://github.com/zcy83821448/DirText/releases)
+2. 下载 `DirText.exe`
+3. 双击运行 — **无需安装**
+
+> ⚠️ Windows 可能会显示 SmartScreen 安全警告（因为未进行代码签名）。点击 **"更多信息" → "仍要运行"** 即可。
+
+---
+
+## 🚀 快速上手
+
+1. **运行** `DirText.exe`
+2. **添加文件夹**，任选一种方式：
+   - 点击 **"添加文件夹"** 在对话框中选择
+   - **拖拽** 文件夹到窗口内
+   - 启动前复制文件夹路径到剪贴板 — 程序会自动识别
+3. 在递归深度输入框中设置层数（默认 `0` = 仅当前层）
+4. **实时预览** 生成的目录树
+5. 点击 **"导出文本"** → 选择 **TXT / CSV / JSON** → 自动带时间戳保存
+
+---
+
+## 🖼️ 界面截图
+
+> *(在 GitHub 编辑器中拖拽截图图片到此处即可自动上传)*
+
+---
+
+## 🛠️ 从源码运行
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/zcy83821448/DirText.git
+cd DirText
+
+# 2. 安装依赖
+pip install -r requirements.txt
+
+# 3. 运行
+python dirtext.py
+```
+
+### 打包为可执行文件（可选）
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --icon=app.ico dirtext.py
+```
+
+---
+
+## 📝 更新日志
+
+### v3.5
+- **导出格式选择** — 支持 TXT、CSV、JSON 三种格式
+- **拖拽文件夹支持** — 拖入窗口任意区域即可自动添加扫描，重复文件夹自动跳过
+- **递归深度自由输入** — 替换下拉框为文本输入，带 1 秒防抖自动扫描
+- **欢迎页面更新** — 新增使用说明
+
+### v3.0
+- 多文件夹选择对话框
+- 剪贴板路径自动识别
+- 递归深度控制（下拉框）
+- 中英文界面自动切换
+- 一键导出 `.txt`
+
+---
+
+## 🏷️ 关键词 / 标签
+
+`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `JSON导出` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持`
+
+---
+
+## 📄 开源协议
+
+[MIT](LICENSE)
+
+---
+
+> Written with [Claude Code](https://claude.ai/code)

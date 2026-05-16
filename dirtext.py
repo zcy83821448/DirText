@@ -6,6 +6,7 @@ Automatically switches UI language based on system locale.
 根据系统区域自动切换界面语言。
 """
 
+import csv
 import json
 import locale
 import os
@@ -19,7 +20,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QPlainTextEdit, QVBoxLayout, QHBoxLayout, QMessageBox,
     QFileDialog, QDialog, QTreeView, QAbstractItemView,
-    QComboBox, QProgressBar, QHeaderView, QGraphicsOpacityEffect
+    QComboBox, QProgressBar, QHeaderView, QGraphicsOpacityEffect, QLineEdit
 )
 from PyQt6.QtCore import Qt, QTimer, QSortFilterProxyModel, QDir, QPropertyAnimation, QEasingCurve, pyqtSignal, QThread
 from PyQt6.QtGui import QFileSystemModel
@@ -58,7 +59,7 @@ T = {
         'clear': 'Clear',
         'export': 'Export',
         'ready': 'Ready',
-        'welcome': "Welcome to Directory to Text\n\nInstructions:\n  1. Click 'Add Folder' to select folders\n  2. Preview area shows the content\n  3. Click 'Export' to save\n\nClick a button to get started",
+        'welcome': "Welcome to Directory to Text\n\nInstructions:\n  1. Click 'Add Folder' or drag folders onto the window\n  2. Set depth in 'Recursion [N] Levels' (-1 = all, 0 = current)\n  3. Preview area shows the content\n  4. Click 'Export' to save\n\nClick a button to get started",
         'dup_folder': 'This folder is already in the list!',
         'no_content': 'No content to export!',
         'save_title': 'Save file list',
@@ -72,13 +73,29 @@ T = {
         'add_hint': 'Ctrl+click to select multiple / Ctrl+A to select all',
         'drive_switch': 'Drive:',
         'current_path': 'Current:',
-        'recursion_label': 'Depth:',
-        'recursion_current': 'Current Level',
-        'recursion_level': 'Rec. {n} Lvl',
-        'recursion_all': 'Rec. All',
+        'recursion_prefix': 'Recursion ',
+        'recursion_suffix': ' Levels',
+        'recursion_hint': '(-1 = all, 0 = current)',
+        'recursion_welcome': 'Usage: Type a number in "Recursion [N] Levels" to set depth.\n  -1 = all levels   0 = current level only   1+ = N levels deep',
         'cancel': 'Cancel',
         'scanning': 'Scanning: {path}',
         'cancelling': 'Cancelling...',
+        'export_format': 'Export Format',
+        'format_prompt': 'Select export format:',
+        'format_txt': 'Text File (.txt)',
+        'format_csv': 'CSV File (.csv)',
+        'format_json': 'JSON File (.json)',
+        'csv_save_title': 'Save CSV file list',
+        'csv_file_name': 'file_list_{ts}.csv',
+        'json_save_title': 'Save JSON file list',
+        'json_file_name': 'file_list_{ts}.json',
+        'csv_col_folder': 'Folder',
+        'csv_col_name': 'Name',
+        'csv_col_path': 'Full Path',
+        'csv_col_type': 'Type',
+        'csv_col_level': 'Level',
+        'csv_type_dir': 'Directory',
+        'csv_type_file': 'File',
     },
     'zh': {
         'title': 'DirText v3.0',
@@ -88,7 +105,7 @@ T = {
         'clear': '清空选择',
         'export': '导出文本',
         'ready': '就绪',
-        'welcome': '欢迎使用文件目录提取器\n\n使用说明：\n  1. 点击「添加文件夹」选择多个文件夹\n  2. 预览区显示内容\n  3. 点击「导出文本」保存\n\n点击按钮开始使用吧',
+        'welcome': '欢迎使用文件目录提取器\n\n使用说明：\n  1. 点击「添加文件夹」或拖入文件夹到窗口\n  2. 在"递归【N】层"中设置深度（-1 = 全部，0 = 当前层）\n  3. 预览区显示内容\n  4. 点击「导出文本」保存\n\n点击按钮开始使用吧',
         'dup_folder': '该文件夹已在列表中！',
         'no_content': '没有可导出的内容！',
         'save_title': '保存文件列表',
@@ -102,13 +119,29 @@ T = {
         'add_hint': 'Ctrl+单击 多选 / Ctrl+A 全选',
         'drive_switch': '驱动器:',
         'current_path': '当前位置:',
-        'recursion_label': '层级：',
-        'recursion_current': '仅当前层',
-        'recursion_level': '递归 {n} 层',
-        'recursion_all': '递归全部',
+        'recursion_prefix': '递归 ',
+        'recursion_suffix': ' 层',
+        'recursion_hint': '（-1 = 全部层级，0 = 仅当前层）',
+        'recursion_welcome': '用法：在"递归【N】层"中输入数字设置深度。\n  -1 = 全部层级   0 = 仅当前层   1+ = 向下N层',
         'cancel': '取消',
         'scanning': '正在扫描：{path}',
         'cancelling': '正在取消...',
+        'export_format': '导出格式',
+        'format_prompt': '请选择导出格式：',
+        'format_txt': '文本文件 (.txt)',
+        'format_csv': 'CSV 文件 (.csv)',
+        'format_json': 'JSON 文件 (.json)',
+        'csv_save_title': '保存 CSV 文件列表',
+        'csv_file_name': '文件列表_{ts}.csv',
+        'json_save_title': '保存 JSON 文件列表',
+        'json_file_name': '文件列表_{ts}.json',
+        'csv_col_folder': '所属文件夹',
+        'csv_col_name': '名称',
+        'csv_col_path': '完整路径',
+        'csv_col_type': '类型',
+        'csv_col_level': '层级',
+        'csv_type_dir': '文件夹',
+        'csv_type_file': '文件',
     }
 }
 
@@ -380,6 +413,7 @@ class ScanWorker(QThread):
         self.folders = folders
         self.recursion_depth = recursion_depth
         self._abort = False
+        self.structured_data = []  # (folder_root, name, full_path, is_dir, level)
 
     def abort(self):
         self._abort = True
@@ -405,7 +439,7 @@ class ScanWorker(QThread):
             else:
                 lines.append(f"文件夹 [{i + 1}]：{folder}")
             lines.append(sep)
-            entry_lines, d, f = self._walk_dir(folder, self.recursion_depth)
+            entry_lines, d, f = self._walk_dir(folder, self.recursion_depth, root=folder)
             lines.extend(entry_lines)
             total_dirs += d
             total_files += f
@@ -427,7 +461,7 @@ class ScanWorker(QThread):
             self.progress.emit(self._item_index)
             self._last_emit_time = now
 
-    def _walk_dir(self, folder, max_depth, current_depth=0, prefix=""):
+    def _walk_dir(self, folder, max_depth, current_depth=0, prefix="", root=None):
         lines = []
         dir_count = 0
         file_count = 0
@@ -460,17 +494,110 @@ class ScanWorker(QThread):
             if entry.is_dir():
                 lines.append(f"{prefix}{connector}{entry.name}/")
                 dir_count += 1
+                if root is not None:
+                    self.structured_data.append((root, entry.name, entry.path, True, current_depth))
                 if max_depth == -1 or current_depth < max_depth:
                     sub_lines, sub_dirs, sub_files = self._walk_dir(
-                        entry.path, max_depth, current_depth + 1, prefix + child_prefix)
+                        entry.path, max_depth, current_depth + 1, prefix + child_prefix, root)
                     lines.extend(sub_lines)
                     dir_count += sub_dirs
                     file_count += sub_files
             else:
                 lines.append(f"{prefix}{connector}{entry.name}")
                 file_count += 1
+                if root is not None:
+                    self.structured_data.append((root, entry.name, entry.path, False, current_depth))
 
         return lines, dir_count, file_count
+
+
+# ---------- 导出格式选择对话框 / Export Format Dialog ----------
+class FormatOption(QWidget):
+    toggled = pyqtSignal()
+
+    def __init__(self, text, parent=None):
+        super().__init__(parent)
+        self._selected = False
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(6)
+
+        self._circle = QLabel()
+        self._circle.setFixedWidth(16)
+        self._text = QLabel(text)
+        self._text.setStyleSheet(f"color: {FG}; font-size: 10pt; background: transparent;")
+        layout.addWidget(self._circle)
+        layout.addWidget(self._text)
+        layout.addStretch()
+        self._update_circle()
+
+    def _update_circle(self):
+        if self._selected:
+            self._circle.setText('<span style="color: #34c759; font-size: 11pt;">●</span>')
+        else:
+            self._circle.setText('<span style="color: #c6c6ca; font-size: 11pt;">○</span>')
+
+    def set_selected(self, v):
+        self._selected = v
+        self._update_circle()
+
+    def mousePressEvent(self, event):
+        if not self._selected:
+            self.set_selected(True)
+            self.toggled.emit()
+
+
+class ExportFormatDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.selected_format = 'txt'
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle(t('export_format'))
+        self.setFixedSize(300, 195)
+        self.setStyleSheet(f"QDialog {{ background: {BG}; }}")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 15, 20, 10)
+        layout.setSpacing(8)
+
+        prompt = QLabel(t('format_prompt'))
+        prompt.setStyleSheet(f"color: {FG}; font-size: 10pt; background: transparent;")
+        layout.addWidget(prompt)
+
+        self.opt_txt = FormatOption(t('format_txt'))
+        self.opt_txt.set_selected(True)
+        self.opt_txt.toggled.connect(lambda: self._on_option_toggled('txt'))
+        layout.addWidget(self.opt_txt)
+
+        self.opt_csv = FormatOption(t('format_csv'))
+        self.opt_csv.toggled.connect(lambda: self._on_option_toggled('csv'))
+        layout.addWidget(self.opt_csv)
+
+        self.opt_json = FormatOption(t('format_json'))
+        self.opt_json.toggled.connect(lambda: self._on_option_toggled('json'))
+        layout.addWidget(self.opt_json)
+
+        layout.addSpacing(6)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        for text, slot in [('OK', self._accept), ('Cancel', self.reject)]:
+            btn = AnimatedButton(text)
+            btn.setStyleSheet(BTN_STYLE)
+            btn.clicked.connect(slot)
+            btn_layout.addWidget(btn)
+        layout.addLayout(btn_layout)
+
+    def _on_option_toggled(self, fmt):
+        self.selected_format = fmt
+        self.opt_txt.set_selected(fmt == 'txt')
+        self.opt_csv.set_selected(fmt == 'csv')
+        self.opt_json.set_selected(fmt == 'json')
+
+    def _accept(self):
+        self.accept()
 
 
 # ---------- 主应用 / Main Application ----------
@@ -485,6 +612,11 @@ class DirTextApp(QMainWindow):
         self._transition = TransitionManager()
         self._worker = None
         self._scanning = False
+        self.structured_data = []
+        self._depth_timer = QTimer(self)
+        self._depth_timer.setSingleShot(True)
+        self._depth_timer.setInterval(1000)
+        self._depth_timer.timeout.connect(self._apply_depth)
         self._setup_ui()
 
     # ----- 配置读写 / Config read/write -----
@@ -529,6 +661,24 @@ class DirTextApp(QMainWindow):
         if self.isVisible():
             self._remember_geometry()
 
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        added = 0
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if os.path.isdir(path) and path not in self.folders:
+                self.folders.append(path)
+                added += 1
+        if added:
+            self._scan()
+
     # ----- 过渡效果 / Transition Effects -----
     def showEvent(self, event):
         super().showEvent(event)
@@ -572,6 +722,7 @@ class DirTextApp(QMainWindow):
         self.setWindowTitle(t('title'))
         self.setMinimumSize(700, 500)
         self.setStyleSheet(f"QMainWindow {{ background: {BG}; }}")
+        self.setAcceptDrops(True)
 
         w, h = self.cfg.get('w', 900), self.cfg.get('h', 650)
         self.resize(w, h)
@@ -677,39 +828,33 @@ class DirTextApp(QMainWindow):
 
         btn_layout.addStretch()
 
-        # 递归深度选择器 / Recursion depth selector
-        depth_lbl = QLabel(t('recursion_label'))
-        depth_lbl.setStyleSheet(f"color: {FG2}; font-size: 9pt; background: transparent;")
-        btn_layout.addWidget(depth_lbl)
+        # 递归深度输入 / Recursion depth input
+        depth_prefix = QLabel(t('recursion_prefix'))
+        depth_prefix.setStyleSheet(f"color: {FG2}; font-size: 9pt; background: transparent;")
+        btn_layout.addWidget(depth_prefix)
 
-        self.depth_combo = QComboBox()
-        self.depth_combo.setEditable(True)
-        self.depth_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.depth_combo.setStyleSheet(f"""
-            QComboBox {{
-                font-size: 9pt; padding: 2px 4px;
+        self.depth_input = QLineEdit()
+        self.depth_input.setText('0')
+        self.depth_input.setFixedWidth(38)
+        self.depth_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.depth_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 9pt; padding: 2px 2px;
                 background: {SURFACE}; color: {FG};
                 border: 1px solid #d1d1d6; border-radius: 4px;
-                min-width: 90px;
             }}
-            QComboBox:hover {{ border-color: #007aff; }}
-            QComboBox QAbstractItemView {{
-                font-size: 9pt; background: {SURFACE}; color: {FG};
-                selection-background-color: #007aff;
-            }}
+            QLineEdit:focus {{ border-color: #007aff; }}
         """)
-        self._depth_values = [0, 1, 2, 3, -1]
-        for val in self._depth_values:
-            if val == 0:
-                self.depth_combo.addItem(t('recursion_current'))
-            elif val == -1:
-                self.depth_combo.addItem(t('recursion_all'))
-            else:
-                self.depth_combo.addItem(t('recursion_level', n=val))
-        self.depth_combo.setCurrentIndex(0)
-        self.depth_combo.activated.connect(self._on_depth_changed)
-        self.depth_combo.lineEdit().editingFinished.connect(self._on_depth_edited)
-        btn_layout.addWidget(self.depth_combo)
+        self.depth_input.textChanged.connect(self._on_depth_input)
+        btn_layout.addWidget(self.depth_input)
+
+        depth_suffix = QLabel(t('recursion_suffix'))
+        depth_suffix.setStyleSheet(f"color: {FG2}; font-size: 9pt; background: transparent;")
+        btn_layout.addWidget(depth_suffix)
+
+        depth_hint = QLabel(t('recursion_hint'))
+        depth_hint.setStyleSheet(f"color: {FG2}; font-size: 8pt; background: transparent;")
+        btn_layout.addWidget(depth_hint)
 
         layout.addLayout(btn_layout)
 
@@ -808,35 +953,30 @@ class DirTextApp(QMainWindow):
         self.status.showMessage(t('ready'))
 
     # ----- 递归深度控制 / Recursion Depth Control -----
-    def _on_depth_changed(self, index):
-        """用户通过下拉选择改变深度"""
-        if self._scanning or index < 0:
-            return
-            
-        new_depth = self._depth_values[index]
-        if new_depth == self.recursion_depth:
-            return  # 没有实际变化，不重复扫描
-            
-        self.recursion_depth = new_depth
-        self._scan()
-
-    def _on_depth_edited(self):
-        """用户手动编辑 ComboBox 文本后确认"""
+    def _on_depth_input(self):
+        # Reset debounce timer on every keystroke
         if self._scanning:
             return
-            
-        text = self.depth_combo.currentText().strip()
-        match = re.search(r'\d+', text)
-        
-        if match:
-            new_depth = int(match.group())
-        else:
+        self._depth_timer.start()
+
+    def _apply_depth(self):
+        if self._scanning:
+            return
+
+        text = self.depth_input.text().strip()
+        if not text:
             new_depth = 0
-            self.depth_combo.setCurrentIndex(0)
-            
+        else:
+            match = re.match(r'^-?\d+', text)
+            if match:
+                new_depth = int(match.group())
+            else:
+                new_depth = 0
+                self.depth_input.setText('0')
+
         if new_depth == self.recursion_depth:
-            return  # 无实际变化
-            
+            return
+
         self.recursion_depth = new_depth
         self._scan()
         
@@ -846,7 +986,7 @@ class DirTextApp(QMainWindow):
         self.btn_add.setEnabled(not scanning)
         self.btn_clipboard.setEnabled(not scanning)
         self.btn_export.setEnabled(not scanning)
-        self.depth_combo.setEnabled(not scanning)
+        self.depth_input.setEnabled(not scanning)
         try:
             self.btn_clear.clicked.disconnect()
         except TypeError:
@@ -880,6 +1020,7 @@ class DirTextApp(QMainWindow):
     def _on_scan_finished(self, lines, total_dirs, total_files):
         if not self._scanning:
             return
+        self.structured_data = self._worker.structured_data if self._worker else []
         self._worker = None
         self._set_scanning_state(False)
         self.progress_bar.setRange(0, 100)
@@ -908,7 +1049,21 @@ class DirTextApp(QMainWindow):
         if not content or content.startswith(t('welcome')[:20]):
             QMessageBox.warning(self, 'Warning', t('no_content'))
             return
+
+        fmt_dlg = ExportFormatDialog(self)
+        if fmt_dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+        if fmt_dlg.selected_format == 'csv':
+            self._export_csv(timestamp)
+        elif fmt_dlg.selected_format == 'json':
+            self._export_json(timestamp)
+        else:
+            self._export_txt(content, timestamp)
+
+    def _export_txt(self, content, timestamp):
         fname, _ = QFileDialog.getSaveFileName(
             self, t('save_title'),
             t('file_name', ts=timestamp),
@@ -919,6 +1074,57 @@ class DirTextApp(QMainWindow):
         try:
             with open(fname, 'w', encoding='utf-8') as f:
                 f.write(content + f"\n\nGenerated: {datetime.now():%Y-%m-%d %H:%M:%S}")
+            QMessageBox.information(self, 'Success', t('success', path=fname))
+            self.status.showMessage(os.path.basename(fname))
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
+
+    def _export_csv(self, timestamp):
+        fname, _ = QFileDialog.getSaveFileName(
+            self, t('csv_save_title'),
+            t('csv_file_name', ts=timestamp),
+            'CSV files (*.csv);;All files (*.*)',
+        )
+        if not fname:
+            return
+        try:
+            with open(fname, 'w', encoding='utf-8-sig', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    t('csv_col_folder'), t('csv_col_name'), t('csv_col_path'),
+                    t('csv_col_type'), t('csv_col_level'),
+                ])
+                for root, name, path, is_dir, level in self.structured_data:
+                    writer.writerow([
+                        root, name, path,
+                        t('csv_type_dir') if is_dir else t('csv_type_file'),
+                        level,
+                    ])
+            QMessageBox.information(self, 'Success', t('success', path=fname))
+            self.status.showMessage(os.path.basename(fname))
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
+
+    def _export_json(self, timestamp):
+        fname, _ = QFileDialog.getSaveFileName(
+            self, t('json_save_title'),
+            t('json_file_name', ts=timestamp),
+            'JSON files (*.json);;All files (*.*)',
+        )
+        if not fname:
+            return
+        try:
+            data = []
+            for root, name, path, is_dir, level in self.structured_data:
+                data.append({
+                    t('csv_col_folder'): root,
+                    t('csv_col_name'): name,
+                    t('csv_col_path'): path,
+                    t('csv_col_type'): t('csv_type_dir') if is_dir else t('csv_type_file'),
+                    t('csv_col_level'): level,
+                })
+            with open(fname, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
             QMessageBox.information(self, 'Success', t('success', path=fname))
             self.status.showMessage(os.path.basename(fname))
         except Exception as e:
