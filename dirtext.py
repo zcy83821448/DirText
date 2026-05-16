@@ -7,6 +7,7 @@ Automatically switches UI language based on system locale.
 """
 
 import csv
+import fnmatch
 import json
 import locale
 import os
@@ -20,10 +21,11 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QPlainTextEdit, QVBoxLayout, QHBoxLayout, QMessageBox,
     QFileDialog, QDialog, QTreeView, QAbstractItemView,
-    QComboBox, QProgressBar, QHeaderView, QGraphicsOpacityEffect, QLineEdit, QCheckBox
+    QComboBox, QProgressBar, QHeaderView, QGraphicsOpacityEffect,
+    QLineEdit, QCheckBox, QToolTip, QListWidget
 )
 from PyQt6.QtCore import Qt, QTimer, QSortFilterProxyModel, QDir, QPropertyAnimation, QEasingCurve, pyqtSignal, QThread
-from PyQt6.QtGui import QFileSystemModel
+from PyQt6.QtGui import QFileSystemModel, QFont
 
 # ---------- 语言检测 / Language Detection ----------
 def get_system_language():
@@ -52,14 +54,14 @@ LANG = get_system_language()
 # ---------- 国际化文本 / Internationalized Text ----------
 T = {
     'en': {
-        'title': 'DirText v3.0',
+        'title': 'DirText v3.6',
         'header': 'Directory to Text',
         'subtitle': 'Quickly browse folder contents and export list',
         'add': 'Add Folder',
         'clear': 'Clear',
         'export': 'Export',
         'ready': 'Ready',
-        'welcome': "Welcome to Directory to Text\n\nInstructions:\n  1. Click 'Add Folder' or drag folders onto the window\n  2. Set depth in 'Recursion [N] Levels' (-1 = all, 0 = current)\n  3. Preview area shows the content\n  4. Click 'Export' to save\n\nClick a button to get started",
+        'welcome': "Welcome to Directory to Text\n\nInstructions:\n  1. Click 'Add Folder' or drag folders onto the window\n  2. Set depth in 'Recursion [N] Levels' (-1 = all, 0 = current)\n  3. Preview area shows the content\n  4. Click 'Export' to save\n  5. Click any file/dir name in preview to copy its path\n\nClick a button to get started",
         'dup_folder': 'This folder is already in the list!',
         'no_content': 'No content to export!',
         'save_title': 'Save file list',
@@ -112,16 +114,23 @@ T = {
         'exporting': 'Exporting...',
         'export_progress': 'Exporting %v / %m',
         'export_lang_label': 'Lang: ',
+        'path_copied': 'File path copied to clipboard: {path}',
+        'ignore': 'Ignore',
+        'ignore_title': 'Ignore List',
+        'ignore_prompt': 'Files / folders matching these patterns will be skipped during scan:',
+        'ignore_hint': 'Supports wildcards (*.log, *.tmp). One pattern per line.',
+        'ignore_add': 'Add',
+        'ignore_remove': 'Remove',
     },
     'zh': {
-        'title': 'DirText v3.0',
+        'title': 'DirText v3.6',
         'header': '文件目录提取器',
         'subtitle': '快速浏览文件夹内容并导出列表',
         'add': '添加文件夹',
         'clear': '清空选择',
         'export': '导出文本',
         'ready': '就绪',
-        'welcome': '欢迎使用文件目录提取器\n\n使用说明：\n  1. 点击「添加文件夹」或拖入文件夹到窗口\n  2. 在"递归【N】层"中设置深度（-1 = 全部，0 = 当前层）\n  3. 预览区显示内容\n  4. 点击「导出文本」保存\n\n点击按钮开始使用吧',
+        'welcome': '欢迎使用文件目录提取器\n\n使用说明：\n  1. 点击「添加文件夹」或拖入文件夹到窗口\n  2. 在"递归【N】层"中设置深度（-1 = 全部，0 = 当前层）\n  3. 预览区显示内容\n  4. 点击「导出文本」保存\n  5. 在预览中点击任意文件/文件夹名称即可复制路径\n\n点击按钮开始使用吧',
         'dup_folder': '该文件夹已在列表中！',
         'no_content': '没有可导出的内容！',
         'save_title': '保存文件列表',
@@ -174,6 +183,13 @@ T = {
         'exporting': '正在导出...',
         'export_progress': '正在导出 %v / %m',
         'export_lang_label': '导出语言：',
+        'path_copied': '已将该文件路径复制到剪贴板：{path}',
+        'ignore': '忽略',
+        'ignore_title': '忽略列表',
+        'ignore_prompt': '扫描时将自动跳过匹配以下模式的文件 / 文件夹：',
+        'ignore_hint': '支持通配符（*.log、*.tmp）。每行一个模式。',
+        'ignore_add': '添加',
+        'ignore_remove': '移除',
     }
 }
 
@@ -202,20 +218,33 @@ def format_timestamp(ts):
     return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
 
 
-# ---------- 样式常量 / Style Constants ----------
-BG = "#F5F5F7"
-FG = "#1D1D1F"
-FG2 = "#86868B"
-SURFACE = "#FFFFFF"
+# ---------- 主题颜色 / Theme Colors ----------
+THEMES = {
+    'light': {
+        'bg': '#F5F5F7', 'fg': '#1D1D1F', 'fg2': '#86868B', 'surface': '#FFFFFF',
+        'border': '#d1d1d6', 'hover_bg': '#e8e8ed', 'pressed_bg': '#d1d1d6',
+        'accent': '#007aff', 'scroll_handle': '#c6c6ca', 'scroll_handle_hover': '#a8a8ae',
+        'progress_bg': '#e0e0e5', 'option_circle': '#c6c6ca', 'accent_green': '#34c759',
+    },
+    'dark': {
+        'bg': '#1C1C1E', 'fg': '#F5F5F7', 'fg2': '#98989D', 'surface': '#2C2C2E',
+        'border': '#48484A', 'hover_bg': '#3A3A3C', 'pressed_bg': '#48484A',
+        'accent': '#0A84FF', 'scroll_handle': '#636366', 'scroll_handle_hover': '#7C7C80',
+        'progress_bg': '#3A3A3C', 'option_circle': '#636366', 'accent_green': '#30D158',
+    },
+}
+C = dict(THEMES['light'])  # current theme, mutated on toggle
 
-BTN_STYLE = f"""
+
+def _make_btn_style(c):
+    return f"""
     QPushButton {{
-        font-family: 'Microsoft YaHei UI'; font-size: 10pt;
-        padding: 6px 20px; background: {SURFACE};
-        color: {FG}; border: 1px solid #d1d1d6; border-radius: 4px;
+        font-family: 'Microsoft YaHei'; font-weight: bold; font-size: 10pt;
+        padding: 6px 20px; background: {c['surface']};
+        color: {c['fg']}; border: 1px solid {c['border']}; border-radius: 4px;
     }}
-    QPushButton:hover {{ background: #e8e8ed; }}
-    QPushButton:pressed {{ background: #d1d1d6; }}
+    QPushButton:hover {{ background: {c['hover_bg']}; }}
+    QPushButton:pressed {{ background: {c['pressed_bg']}; }}
 """
 
 
@@ -249,7 +278,7 @@ class FolderSelectDialog(QDialog):
         h = self.cfg.get('fd_h', 600)
         self.resize(w, h)
 
-        self.setStyleSheet(f"QDialog {{ background: {BG}; }}")
+        self.setStyleSheet(f"QDialog {{ background: {C['bg']}; }}")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -269,10 +298,10 @@ class FolderSelectDialog(QDialog):
             return
         drive_bar = QHBoxLayout()
         lbl = QLabel(t('drive_switch'))
-        lbl.setStyleSheet(f"color: {FG}; font-size: 9pt; background: transparent;")
+        lbl.setStyleSheet(f"color: {C['fg']}; font-size: 9pt; background: transparent;")
         drive_bar.addWidget(lbl)
         self.drive_cb = QComboBox()
-        self.drive_cb.setStyleSheet("QComboBox { font-size: 10pt; padding: 2px 4px; }")
+        self.drive_cb.setStyleSheet(f"QComboBox {{ font-size: 10pt; padding: 2px 4px; background: {C['surface']}; color: {C['fg']}; border: 1px solid {C['border']}; }}")
         for drive in QDir.drives():
             self.drive_cb.addItem(os.path.normpath(drive.path()))
         self.drive_cb.currentIndexChanged.connect(self._switch_drive)
@@ -281,7 +310,7 @@ class FolderSelectDialog(QDialog):
 
     def _setup_path_label(self, layout):
         self.path_label = QLabel()
-        self.path_label.setStyleSheet(f"color: {FG2}; font-size: 9pt; background: transparent;")
+        self.path_label.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
         self.path_label.setWordWrap(True)
         layout.addWidget(self.path_label)
 
@@ -298,19 +327,19 @@ class FolderSelectDialog(QDialog):
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.setStyleSheet(f"""
             QTreeView {{
-                background: {SURFACE}; color: {FG};
-                border: 1px solid #d1d1d6; border-radius: 4px;
+                background: {C['surface']}; color: {C['fg']};
+                border: 1px solid {C['border']}; border-radius: 4px;
                 font-size: 10pt;
             }}
             QTreeView::item:selected {{
-                background: #007aff; color: white;
+                background: {C['accent']}; color: white;
             }}
         """)
         layout.addWidget(self.tree, stretch=1)
 
     def _setup_hint(self, layout):
         hint = QLabel(t('add_hint'))
-        hint.setStyleSheet(f"color: {FG2}; font-size: 9pt; background: transparent;")
+        hint.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
         layout.addWidget(hint)
 
     def _setup_dialog_buttons(self, layout):
@@ -321,7 +350,7 @@ class FolderSelectDialog(QDialog):
             ('Cancel', self.reject),
         ]:
             btn = AnimatedButton(text)
-            btn.setStyleSheet(BTN_STYLE)
+            btn.setStyleSheet(_make_btn_style(C))
             btn.clicked.connect(slot)
             btn_layout.addWidget(btn)
         layout.addLayout(btn_layout)
@@ -460,18 +489,20 @@ class ScanWorker(QThread):
     progress = pyqtSignal(int)
     finished = pyqtSignal(list, int, int)
 
-    def __init__(self, folders, recursion_depth):
+    def __init__(self, folders, recursion_depth, ignore_patterns=None):
         super().__init__()
         self.folders = folders
         self.recursion_depth = recursion_depth
+        self.ignore_patterns = ignore_patterns or []
         self._abort = False
-        self.structured_data = []  # list of dicts with folder/name/path/type/level/size/created/modified/accessed
+        self.structured_data = []
 
     def abort(self):
         self._abort = True
 
     def run(self):
         lines = []
+        line_paths = []
         total_dirs = 0
         total_files = 0
         sep = '═' * 80
@@ -483,28 +514,37 @@ class ScanWorker(QThread):
         for i, folder in enumerate(self.folders):
             if self._abort:
                 lines.append(f"⚠ {t('cancelling')}")
+                line_paths.append(None)
                 break
             self.folder_progress.emit(folder)
             lines.append(sep)
+            line_paths.append(None)
             if LANG == 'en':
                 lines.append(f"Folder [{i + 1}]: {folder}")
             else:
                 lines.append(f"文件夹 [{i + 1}]：{folder}")
+            line_paths.append(None)
             lines.append(sep)
-            entry_lines, d, f = self._walk_dir(folder, self.recursion_depth, root=folder)
+            line_paths.append(None)
+            entry_lines, d, f = self._walk_dir(folder, self.recursion_depth, root=folder, line_paths=line_paths)
             lines.extend(entry_lines)
             total_dirs += d
             total_files += f
             lines.append("")
+            line_paths.append(None)
 
         lines.append(sep)
+        line_paths.append(None)
         if LANG == 'en':
             lines.append(f"Total: {len(self.folders)} folder(s)")
             lines.append(f"         {total_dirs} folders, {total_files} files")
         else:
             lines.append(f"总计：{len(self.folders)} 个文件夹")
             lines.append(f"         共 {total_dirs} 个文件夹，{total_files} 个文件")
+        line_paths.append(None)
+        line_paths.append(None)
 
+        self._line_paths = line_paths
         self.finished.emit(lines, total_dirs, total_files)
 
     def _should_emit_progress(self):
@@ -513,7 +553,7 @@ class ScanWorker(QThread):
             self.progress.emit(self._item_index)
             self._last_emit_time = now
 
-    def _walk_dir(self, folder, max_depth, current_depth=0, prefix="", root=None):
+    def _walk_dir(self, folder, max_depth, current_depth=0, prefix="", root=None, line_paths=None):
         lines = []
         dir_count = 0
         file_count = 0
@@ -523,14 +563,22 @@ class ScanWorker(QThread):
 
         try:
             entries = sorted(os.scandir(folder), key=lambda e: e.name)
+            if self.ignore_patterns:
+                entries = [e for e in entries
+                           if not any(fnmatch.fnmatch(e.name, p)
+                                      for p in self.ignore_patterns)]
         except PermissionError:
             if LANG == 'en':
                 lines.append(f"{prefix}└── <Access denied>")
             else:
                 lines.append(f"{prefix}└── <无法访问>")
+            if line_paths is not None:
+                line_paths.append(None)
             return lines, 0, 0
         except Exception as e:
             lines.append(f"{prefix}└── <Error: {e}>")
+            if line_paths is not None:
+                line_paths.append(None)
             return lines, 0, 0
 
         for i, entry in enumerate(entries):
@@ -545,6 +593,8 @@ class ScanWorker(QThread):
 
             if entry.is_dir():
                 lines.append(f"{prefix}{connector}{entry.name}/")
+                if line_paths is not None:
+                    line_paths.append(entry.path)
                 dir_count += 1
                 if root is not None:
                     st = self._safe_stat(entry)
@@ -556,12 +606,14 @@ class ScanWorker(QThread):
                     })
                 if max_depth == -1 or current_depth < max_depth:
                     sub_lines, sub_dirs, sub_files = self._walk_dir(
-                        entry.path, max_depth, current_depth + 1, prefix + child_prefix, root)
+                        entry.path, max_depth, current_depth + 1, prefix + child_prefix, root, line_paths)
                     lines.extend(sub_lines)
                     dir_count += sub_dirs
                     file_count += sub_files
             else:
                 lines.append(f"{prefix}{connector}{entry.name}")
+                if line_paths is not None:
+                    line_paths.append(entry.path)
                 file_count += 1
                 if root is not None:
                     st = self._safe_stat(entry)
@@ -602,7 +654,7 @@ class FormatOption(QWidget):
         self._circle = QLabel()
         self._circle.setFixedWidth(16)
         self._text = QLabel(text)
-        self._text.setStyleSheet(f"color: {FG}; font-size: 10pt; background: transparent;")
+        self._text.setStyleSheet(f"color: {C['fg']}; font-size: 10pt; background: transparent;")
         layout.addWidget(self._circle)
         layout.addWidget(self._text)
         layout.addStretch()
@@ -610,9 +662,9 @@ class FormatOption(QWidget):
 
     def _update_circle(self):
         if self._selected:
-            self._circle.setText('<span style="color: #34c759; font-size: 11pt;">●</span>')
+            self._circle.setText(f'<span style="color: {C["accent_green"]}; font-size: 11pt;">●</span>')
         else:
-            self._circle.setText('<span style="color: #c6c6ca; font-size: 11pt;">○</span>')
+            self._circle.setText(f'<span style="color: {C["option_circle"]}; font-size: 11pt;">○</span>')
 
     def set_selected(self, v):
         self._selected = v
@@ -633,14 +685,14 @@ class ExportFormatDialog(QDialog):
     def _setup_ui(self):
         self.setWindowTitle(t('export_format'))
         self.setFixedSize(300, 195)
-        self.setStyleSheet(f"QDialog {{ background: {BG}; }}")
+        self.setStyleSheet(f"QDialog {{ background: {C['bg']}; }}")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 15, 20, 10)
         layout.setSpacing(8)
 
         prompt = QLabel(t('format_prompt'))
-        prompt.setStyleSheet(f"color: {FG}; font-size: 10pt; background: transparent;")
+        prompt.setStyleSheet(f"color: {C['fg']}; font-size: 10pt; background: transparent;")
         layout.addWidget(prompt)
 
         self.opt_txt = FormatOption(t('format_txt'))
@@ -662,7 +714,7 @@ class ExportFormatDialog(QDialog):
         btn_layout.addStretch()
         for text, slot in [('OK', self._accept), ('Cancel', self.reject)]:
             btn = AnimatedButton(text)
-            btn.setStyleSheet(BTN_STYLE)
+            btn.setStyleSheet(_make_btn_style(C))
             btn.clicked.connect(slot)
             btn_layout.addWidget(btn)
         layout.addLayout(btn_layout)
@@ -688,22 +740,22 @@ class MetadataDialog(QDialog):
     def _setup_ui(self):
         self.setWindowTitle(t('metadata_title'))
         self.setFixedSize(320, 280)
-        self.setStyleSheet(f"QDialog {{ background: {BG}; }}")
+        self.setStyleSheet(f"QDialog {{ background: {C['bg']}; }}")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 15, 20, 10)
         layout.setSpacing(8)
 
         prompt = QLabel(t('metadata_prompt'))
-        prompt.setStyleSheet(f"color: {FG}; font-size: 10pt; background: transparent;")
+        prompt.setStyleSheet(f"color: {C['fg']}; font-size: 10pt; background: transparent;")
         layout.addWidget(prompt)
 
         hint = QLabel(t('metadata_txt_hint'))
-        hint.setStyleSheet(f"color: {FG2}; font-size: 9pt; background: transparent;")
+        hint.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
-        checkbox_style = f"color: {FG}; font-size: 10pt; background: transparent;"
+        checkbox_style = f"color: {C['fg']}; font-size: 10pt; background: transparent;"
 
         self.cb_size = QCheckBox(t('metadata_size'))
         self.cb_size.setChecked(self.options.get('size', False))
@@ -731,7 +783,7 @@ class MetadataDialog(QDialog):
         btn_layout.addStretch()
         for text, slot in [('OK', self._accept), ('Cancel', self.reject)]:
             btn = AnimatedButton(text)
-            btn.setStyleSheet(BTN_STYLE)
+            btn.setStyleSheet(_make_btn_style(C))
             btn.clicked.connect(slot)
             btn_layout.addWidget(btn)
         layout.addLayout(btn_layout)
@@ -746,6 +798,125 @@ class MetadataDialog(QDialog):
         self.accept()
 
 
+# ---------- 忽略列表对话框 / Ignore List Dialog ----------
+class IgnoreListDialog(QDialog):
+    def __init__(self, parent=None, patterns=None):
+        super().__init__(parent)
+        self.patterns = list(patterns) if patterns else []
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle(t('ignore_title'))
+        self.setMinimumSize(340, 320)
+        self.setStyleSheet(f"QDialog {{ background: {C['bg']}; }}")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 15, 20, 10)
+        layout.setSpacing(8)
+
+        prompt = QLabel(t('ignore_prompt'))
+        prompt.setStyleSheet(f"color: {C['fg']}; font-size: 10pt; background: transparent;")
+        prompt.setWordWrap(True)
+        layout.addWidget(prompt)
+
+        hint = QLabel(t('ignore_hint'))
+        hint.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        # pattern list
+        self.list_widget = QListWidget()
+        self.list_widget.setStyleSheet(f"""
+            QListWidget {{
+                background: {C['surface']}; color: {C['fg']};
+                border: 1px solid {C['border']}; border-radius: 4px;
+                font-size: 10pt;
+            }}
+            QListWidget::item:selected {{
+                background: {C['accent']}; color: white;
+            }}
+        """)
+        for p in self.patterns:
+            self.list_widget.addItem(p)
+        layout.addWidget(self.list_widget, stretch=1)
+
+        # input row
+        input_row = QHBoxLayout()
+        self.input = QLineEdit()
+        self.input.setPlaceholderText('node_modules')
+        self.input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 10pt; padding: 4px 6px;
+                background: {C['surface']}; color: {C['fg']};
+                border: 1px solid {C['border']}; border-radius: 4px;
+            }}
+            QLineEdit:focus {{ border-color: {C['accent']}; }}
+        """)
+        self.input.returnPressed.connect(self._add)
+        input_row.addWidget(self.input)
+
+        btn_add = AnimatedButton(t('ignore_add'))
+        btn_add.setStyleSheet(_make_btn_style(C))
+        btn_add.clicked.connect(self._add)
+        input_row.addWidget(btn_add)
+
+        btn_remove = AnimatedButton(t('ignore_remove'))
+        btn_remove.setStyleSheet(_make_btn_style(C))
+        btn_remove.clicked.connect(self._remove)
+        input_row.addWidget(btn_remove)
+
+        layout.addLayout(input_row)
+
+        layout.addSpacing(6)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        for text, slot in [('OK', self._accept), ('Cancel', self.reject)]:
+            btn = AnimatedButton(text)
+            btn.setStyleSheet(_make_btn_style(C))
+            btn.clicked.connect(slot)
+            btn_row.addWidget(btn)
+        layout.addLayout(btn_row)
+
+    def _add(self):
+        text = self.input.text().strip()
+        if text and text not in self.patterns:
+            self.patterns.append(text)
+            self.list_widget.addItem(text)
+        self.input.clear()
+        self.input.setFocus()
+
+    def _remove(self):
+        for item in self.list_widget.selectedItems():
+            row = self.list_widget.row(item)
+            self.list_widget.takeItem(row)
+            if row < len(self.patterns):
+                self.patterns.pop(row)
+
+    def _accept(self):
+        self.patterns = []
+        for i in range(self.list_widget.count()):
+            self.patterns.append(self.list_widget.item(i).text())
+        self.accept()
+
+
+# ---------- 可点击预览 / Clickable Preview ----------
+class ClickablePreview(QPlainTextEdit):
+    lineClicked = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            cursor = self.cursorForPosition(event.pos())
+            block = cursor.block()
+            line = block.blockNumber()
+            if block.text().strip():
+                self.lineClicked.emit(line)
+        super().mouseReleaseEvent(event)
+
+
 # ---------- 主应用 / Main Application ----------
 class DirTextApp(QMainWindow):
     def __init__(self):
@@ -753,15 +924,19 @@ class DirTextApp(QMainWindow):
         self.folders = []
         self.config_path = "dirtext_config.json"
         self._load_config()
+        self._color_mode = self.cfg.get('color_mode', 'light')
+        C.update(THEMES[self._color_mode])
         self._faded_in = False
         self._pending_text = ""
         self._transition = TransitionManager()
         self._worker = None
         self._scanning = False
         self.structured_data = []
+        self._line_paths = []
         self.metadata_options = {
             'size': False, 'created': False, 'modified': False, 'accessed': False,
         }
+        self.ignore_patterns = list(self.cfg.get('ignore_patterns', []))
         self.export_lang = LANG
         self._depth_timer = QTimer(self)
         self._depth_timer.setSingleShot(True)
@@ -775,7 +950,8 @@ class DirTextApp(QMainWindow):
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 self.cfg = json.load(f)
         except:
-            self.cfg = {"w": 900, "h": 650, "x": None, "y": None}
+            self.cfg = {"w": 900, "h": 650, "x": None, "y": None, "color_mode": "light",
+                        "ignore_patterns": ["node_modules", ".git", "__pycache__", "*.pyc", "*.log", "*.tmp"]}
 
     def _save_config(self):
         try:
@@ -871,14 +1047,14 @@ class DirTextApp(QMainWindow):
     def _setup_window(self):
         self.setWindowTitle(t('title'))
         self.setMinimumSize(780, 500)
-        self.setStyleSheet(f"QMainWindow {{ background: {BG}; }}")
+        self.setStyleSheet(f"QMainWindow {{ background: {C['bg']}; }}")
         self.setAcceptDrops(True)
 
         w, h = self.cfg.get('w', 900), self.cfg.get('h', 650)
         self.resize(w, h)
 
         central = QWidget()
-        central.setStyleSheet(f"background: {BG};")
+        central.setStyleSheet(f"background: {C['bg']};")
         self.setCentralWidget(central)
 
     def _setup_header(self, layout):
@@ -890,45 +1066,54 @@ class DirTextApp(QMainWindow):
         self.btn_export_lang.setStyleSheet(f"""
             QPushButton {{
                 font-size: 8pt; padding: 0px;
-                background: {SURFACE}; color: {FG2};
-                border: 1px solid #d1d1d6; border-radius: 3px;
+                background: {C['surface']}; color: {C['fg2']};
+                border: 1px solid {C['border']}; border-radius: 3px;
             }}
-            QPushButton:hover {{ color: {FG}; border-color: #007aff; }}
+            QPushButton:hover {{ color: {C['fg']}; border-color: {C['accent']}; }}
         """)
         self.btn_export_lang.clicked.connect(self._toggle_export_lang)
         header_row.addWidget(self.btn_export_lang)
 
         self.lbl_export_lang = QLabel(t('export_lang_label'))
-        self.lbl_export_lang.setStyleSheet(f"color: {FG2}; font-size: 8pt; background: transparent;")
+        self.lbl_export_lang.setStyleSheet(f"color: {C['fg2']}; font-size: 8pt; background: transparent;")
         header_row.addWidget(self.lbl_export_lang)
         header_row.addStretch()
 
-        header = QLabel(t('header'))
-        header.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {FG}; background: transparent;")
-        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_row.addWidget(header)
+        self._title_label = QLabel(t('header'))
+        self._title_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {C['fg']}; background: transparent;")
+        self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header_row.addWidget(self._title_label)
         header_row.addStretch()
 
-        # spacer to balance the button+label width, keeping title centered
-        spacer = QWidget()
-        spacer.setFixedWidth(105)
-        header_row.addWidget(spacer)
+        # theme toggle button (sun/moon)
+        is_dark = self._color_mode == 'dark'
+        self.btn_theme = QPushButton('☀️' if is_dark else '🌙')
+        self.btn_theme.setFixedSize(30, 28)
+        self.btn_theme.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 14pt; padding: 0px; border: none; background: transparent;
+            }}
+            QPushButton:hover {{ background: {C['hover_bg']}; border-radius: 4px; }}
+        """)
+        self.btn_theme.clicked.connect(self._on_theme_toggle)
+        header_row.addWidget(self.btn_theme)
 
         layout.addLayout(header_row)
 
-        subtitle = QLabel(t('subtitle'))
-        subtitle.setStyleSheet(f"font-size: 9pt; color: {FG2}; background: transparent;")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(subtitle)
+        self._subtitle_label = QLabel(t('subtitle'))
+        self._subtitle_label.setStyleSheet(f"font-size: 9pt; color: {C['fg2']}; background: transparent;")
+        self._subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._subtitle_label)
 
     def _setup_preview(self, layout):
-        self.preview = QPlainTextEdit()
+        self.preview = ClickablePreview()
         self.preview.setReadOnly(True)
+        self.preview.lineClicked.connect(self._on_preview_line_clicked)
         self.preview.setStyleSheet(f"""
             QPlainTextEdit {{
-                font-family: Consolas; font-size: 11pt;
-                background: {SURFACE}; color: {FG};
-                border: 1px solid #d1d1d6; border-radius: 4px;
+                font-family: Consolas, 'Microsoft YaHei'; font-size: 11pt;
+                background: {C['surface']}; color: {C['fg']};
+                border: 1px solid {C['border']}; border-radius: 4px;
                 padding: 10px;
             }}
             QScrollBar:vertical {{
@@ -937,12 +1122,12 @@ class DirTextApp(QMainWindow):
                 margin: 2px 2px 2px 0;
             }}
             QScrollBar::handle:vertical {{
-                background: #c6c6ca;
+                background: {C['scroll_handle']};
                 border-radius: 3px;
                 min-height: 28px;
             }}
             QScrollBar::handle:vertical:hover {{
-                background: #a8a8ae;
+                background: {C['scroll_handle_hover']};
             }}
             QScrollBar::add-line:vertical,
             QScrollBar::sub-line:vertical {{
@@ -969,12 +1154,12 @@ class DirTextApp(QMainWindow):
         self.progress_bar.hide()
         self.progress_bar.setStyleSheet(f"""
             QProgressBar {{
-                border: none; background: #e0e0e5;
+                border: none; background: {C['progress_bg']};
                 border-radius: 7px; font-size: 8pt;
-                color: {FG}; text-align: center;
+                color: {C['fg']}; text-align: center;
             }}
             QProgressBar::chunk {{
-                background: #007aff;
+                background: {C['accent']};
                 border-radius: 7px;
             }}
         """)
@@ -986,36 +1171,41 @@ class DirTextApp(QMainWindow):
         btn_layout.addStretch()
 
         self.btn_add = AnimatedButton(t('add'))
-        self.btn_add.setStyleSheet(BTN_STYLE)
+        self.btn_add.setStyleSheet(_make_btn_style(C))
         self.btn_add.clicked.connect(self.add_folder)
         btn_layout.addWidget(self.btn_add)
 
         self.btn_clipboard = AnimatedButton(t('clipboard_load'))
-        self.btn_clipboard.setStyleSheet(BTN_STYLE)
+        self.btn_clipboard.setStyleSheet(_make_btn_style(C))
         self.btn_clipboard.clicked.connect(self.load_from_clipboard)
         btn_layout.addWidget(self.btn_clipboard)
 
         self.btn_clear = AnimatedButton(t('clear'))
-        self.btn_clear.setStyleSheet(BTN_STYLE)
+        self.btn_clear.setStyleSheet(_make_btn_style(C))
         self.btn_clear.clicked.connect(self.clear)
         btn_layout.addWidget(self.btn_clear)
 
         self.btn_export = AnimatedButton(t('export'))
-        self.btn_export.setStyleSheet(BTN_STYLE)
+        self.btn_export.setStyleSheet(_make_btn_style(C))
         self.btn_export.clicked.connect(self.export)
         btn_layout.addWidget(self.btn_export)
 
         self.btn_metadata = AnimatedButton(t('metadata'))
-        self.btn_metadata.setStyleSheet(BTN_STYLE)
+        self.btn_metadata.setStyleSheet(_make_btn_style(C))
         self.btn_metadata.clicked.connect(self._show_metadata_dialog)
         btn_layout.addWidget(self.btn_metadata)
+
+        self.btn_ignore = AnimatedButton(t('ignore'))
+        self.btn_ignore.setStyleSheet(_make_btn_style(C))
+        self.btn_ignore.clicked.connect(self._show_ignore_dialog)
+        btn_layout.addWidget(self.btn_ignore)
 
         btn_layout.addStretch()
 
         # 递归深度输入 / Recursion depth input
-        depth_prefix = QLabel(t('recursion_prefix'))
-        depth_prefix.setStyleSheet(f"color: {FG2}; font-size: 9pt; background: transparent;")
-        btn_layout.addWidget(depth_prefix)
+        self._depth_prefix = QLabel(t('recursion_prefix'))
+        self._depth_prefix.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
+        btn_layout.addWidget(self._depth_prefix)
 
         self.depth_input = QLineEdit()
         self.depth_input.setText('0')
@@ -1024,26 +1214,26 @@ class DirTextApp(QMainWindow):
         self.depth_input.setStyleSheet(f"""
             QLineEdit {{
                 font-size: 9pt; padding: 2px 2px;
-                background: {SURFACE}; color: {FG};
-                border: 1px solid #d1d1d6; border-radius: 4px;
+                background: {C['surface']}; color: {C['fg']};
+                border: 1px solid {C['border']}; border-radius: 4px;
             }}
-            QLineEdit:focus {{ border-color: #007aff; }}
+            QLineEdit:focus {{ border-color: {C['accent']}; }}
         """)
         self.depth_input.textChanged.connect(self._on_depth_input)
         btn_layout.addWidget(self.depth_input)
 
-        depth_suffix = QLabel(t('recursion_suffix'))
-        depth_suffix.setStyleSheet(f"color: {FG2}; font-size: 9pt; background: transparent;")
-        btn_layout.addWidget(depth_suffix)
+        self._depth_suffix = QLabel(t('recursion_suffix'))
+        self._depth_suffix.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
+        btn_layout.addWidget(self._depth_suffix)
 
-        depth_hint = QLabel(t('recursion_hint'))
-        depth_hint.setStyleSheet(f"color: {FG2}; font-size: 8pt; background: transparent;")
-        btn_layout.addWidget(depth_hint)
+        self._depth_hint = QLabel(t('recursion_hint'))
+        self._depth_hint.setStyleSheet(f"color: {C['fg2']}; font-size: 8pt; background: transparent;")
+        btn_layout.addWidget(self._depth_hint)
 
         layout.addLayout(btn_layout)
 
         self.status = self.statusBar()
-        self.status.setStyleSheet(f"color: {FG2}; font-size: 9pt;")
+        self.status.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt;")
         self.status.showMessage(t('ready'))
         self.recursion_depth = 0
 
@@ -1067,6 +1257,22 @@ class DirTextApp(QMainWindow):
 
     def _show_welcome(self):
         self._set_preview_text(t('welcome'))
+
+    def _on_preview_line_clicked(self, line):
+        if line < len(self._line_paths):
+            path = self._line_paths[line]
+            if path is not None:
+                QApplication.clipboard().setText(path)
+                cursor = self.preview.textCursor()
+                block = self.preview.document().findBlockByLineNumber(line)
+                cursor.setPosition(block.position())
+                rect = self.preview.cursorRect(cursor)
+                QToolTip.showText(
+                    self.preview.mapToGlobal(rect.topLeft()),
+                    t('path_copied', path=path),
+                    self.preview,
+                    rect,
+                )
 
     # ----- 核心功能 / Core Functions -----
     def add_folder(self):
@@ -1133,6 +1339,8 @@ class DirTextApp(QMainWindow):
 
     def clear(self):
         self.folders.clear()
+        self.structured_data.clear()
+        self._line_paths.clear()
         self._show_welcome()
         self.status.showMessage(t('ready'))
 
@@ -1170,6 +1378,7 @@ class DirTextApp(QMainWindow):
         self.btn_add.setEnabled(not scanning)
         self.btn_clipboard.setEnabled(not scanning)
         self.btn_export.setEnabled(not scanning)
+        self.btn_ignore.setEnabled(not scanning)
         self.depth_input.setEnabled(not scanning)
         try:
             self.btn_clear.clicked.disconnect()
@@ -1205,6 +1414,7 @@ class DirTextApp(QMainWindow):
         if not self._scanning:
             return
         self.structured_data = self._worker.structured_data if self._worker else []
+        self._line_paths = self._worker._line_paths if self._worker else []
         self._worker = None
         self._set_scanning_state(False)
         self.progress_bar.setRange(0, 100)
@@ -1221,7 +1431,7 @@ class DirTextApp(QMainWindow):
             self._show_welcome()
             return
         self._set_scanning_state(True)
-        self._worker = ScanWorker(self.folders, self.recursion_depth)
+        self._worker = ScanWorker(self.folders, self.recursion_depth, self.ignore_patterns)
         self._worker.folder_progress.connect(self._on_folder_progress)
         self._worker.progress.connect(self._on_item_progress)
         self._worker.finished.connect(self._on_scan_finished)
@@ -1232,10 +1442,138 @@ class DirTextApp(QMainWindow):
         self.export_lang = 'en' if self.export_lang == 'zh' else 'zh'
         self.btn_export_lang.setText('EN' if self.export_lang == 'zh' else '中文')
 
+    def _apply_theme(self):
+        c = C
+        self.setStyleSheet(f"QMainWindow {{ background: {c['bg']}; }}")
+        self.centralWidget().setStyleSheet(f"background: {c['bg']};")
+
+        btn_style = _make_btn_style(c)
+        for btn in [self.btn_add, self.btn_clipboard, self.btn_clear,
+                     self.btn_export, self.btn_metadata, self.btn_ignore]:
+            btn.setStyleSheet(btn_style)
+
+        self.btn_export_lang.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 8pt; padding: 0px;
+                background: {c['surface']}; color: {c['fg2']};
+                border: 1px solid {c['border']}; border-radius: 3px;
+            }}
+            QPushButton:hover {{ color: {c['fg']}; border-color: {c['accent']}; }}
+        """)
+        self.btn_theme.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 14pt; padding: 0px; border: none; background: transparent;
+            }}
+            QPushButton:hover {{ background: {c['hover_bg']}; border-radius: 4px; }}
+        """)
+        self.lbl_export_lang.setStyleSheet(
+            f"color: {c['fg2']}; font-size: 8pt; background: transparent;")
+
+        self._title_label.setStyleSheet(
+            f"font-size: 18px; font-weight: bold; color: {c['fg']}; background: transparent;")
+        self._subtitle_label.setStyleSheet(
+            f"font-size: 9pt; color: {c['fg2']}; background: transparent;")
+
+        self.preview.setStyleSheet(f"""
+            QPlainTextEdit {{
+                font-family: Consolas, 'Microsoft YaHei'; font-size: 11pt;
+                background: {c['surface']}; color: {c['fg']};
+                border: 1px solid {c['border']}; border-radius: 4px;
+                padding: 10px;
+            }}
+            QScrollBar:vertical {{
+                width: 7px; background: transparent; margin: 2px 2px 2px 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {c['scroll_handle']}; border-radius: 3px; min-height: 28px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {c['scroll_handle_hover']};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{ height: 0px; }}
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{ background: none; }}
+        """)
+
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                border: none; background: {c['progress_bg']};
+                border-radius: 7px; font-size: 8pt;
+                color: {c['fg']}; text-align: center;
+            }}
+            QProgressBar::chunk {{
+                background: {c['accent']}; border-radius: 7px;
+            }}
+        """)
+
+        self.depth_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 9pt; padding: 2px 2px;
+                background: {c['surface']}; color: {c['fg']};
+                border: 1px solid {c['border']}; border-radius: 4px;
+            }}
+            QLineEdit:focus {{ border-color: {c['accent']}; }}
+        """)
+
+        self._depth_prefix.setStyleSheet(
+            f"color: {c['fg2']}; font-size: 9pt; background: transparent;")
+        self._depth_suffix.setStyleSheet(
+            f"color: {c['fg2']}; font-size: 9pt; background: transparent;")
+        self._depth_hint.setStyleSheet(
+            f"color: {c['fg2']}; font-size: 8pt; background: transparent;")
+
+        self.status.setStyleSheet(f"color: {c['fg2']}; font-size: 9pt;")
+
+    @staticmethod
+    def _lerp_hex(a, b, t):
+        ra, ga, ba = int(a[1:3], 16), int(a[3:5], 16), int(a[5:7], 16)
+        rb, gb, bb = int(b[1:3], 16), int(b[3:5], 16), int(b[5:7], 16)
+        return f'#{int(ra+(rb-ra)*t):02x}{int(ga+(gb-ga)*t):02x}{int(ba+(bb-ba)*t):02x}'
+
+    def _theme_tick(self):
+        t = min((time.perf_counter() - self._theme_t0) / 0.55, 1.0)
+        eased = 1.0 - (1.0 - t) ** 3
+        for k in C:
+            if k in self._theme_old_c and k in self._theme_new_c:
+                C[k] = self._lerp_hex(self._theme_old_c[k], self._theme_new_c[k], eased)
+        self._apply_theme()
+        if t >= 1.0:
+            self._theme_timer.stop()
+            self._theme_timer.deleteLater()
+            self._color_mode = self._theme_new_mode
+            self.btn_theme.setText('☀️' if self._color_mode == 'dark' else '🌙')
+            self.cfg['color_mode'] = self._color_mode
+            self._save_config()
+            C.update(self._theme_new_c)
+            self._apply_theme()
+            self._theme_animating = False
+
+    def _on_theme_toggle(self):
+        if getattr(self, '_theme_animating', False):
+            return
+        self._theme_animating = True
+        self._theme_new_mode = 'dark' if self._color_mode == 'light' else 'light'
+        self._theme_old_c = dict(C)
+        self._theme_new_c = dict(THEMES[self._theme_new_mode])
+        self._theme_t0 = time.perf_counter()
+        self._theme_timer = QTimer(self)
+        self._theme_timer.timeout.connect(self._theme_tick)
+        self._theme_timer.start(16)
+
     def _show_metadata_dialog(self):
         dlg = MetadataDialog(self, current_options=self.metadata_options)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.metadata_options = dlg.options
+
+    def _show_ignore_dialog(self):
+        dlg = IgnoreListDialog(self, patterns=self.ignore_patterns)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.ignore_patterns = dlg.patterns
+            self.cfg['ignore_patterns'] = self.ignore_patterns
+            self._save_config()
+            if self.folders:
+                self._scan()
 
     def export(self):
         content = self.preview.toPlainText().strip()
@@ -1400,6 +1738,11 @@ class DirTextApp(QMainWindow):
 # ---------- 入口 / Entry Point ----------
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    f = app.font()
+    f.setFamily('Microsoft YaHei')
+    f.setPointSize(9)
+    f.setWeight(QFont.Weight.Medium)
+    app.setFont(f)
     window = DirTextApp()
     window.show()
     sys.exit(app.exec())
