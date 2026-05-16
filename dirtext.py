@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QPlainTextEdit, QVBoxLayout, QHBoxLayout, QMessageBox,
     QFileDialog, QDialog, QTreeView, QAbstractItemView,
-    QComboBox, QProgressBar, QHeaderView, QGraphicsOpacityEffect, QLineEdit
+    QComboBox, QProgressBar, QHeaderView, QGraphicsOpacityEffect, QLineEdit, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer, QSortFilterProxyModel, QDir, QPropertyAnimation, QEasingCurve, pyqtSignal, QThread
 from PyQt6.QtGui import QFileSystemModel
@@ -96,6 +96,22 @@ T = {
         'csv_col_level': 'Level',
         'csv_type_dir': 'Directory',
         'csv_type_file': 'File',
+        'metadata': 'Metadata',
+        'metadata_title': 'Export Metadata Options',
+        'metadata_prompt': 'Select metadata to include in export:',
+        'metadata_size': 'File Size',
+        'metadata_created': 'Creation Date',
+        'metadata_modified': 'Modification Date',
+        'metadata_accessed': 'Access Date',
+        'csv_col_size': 'Size',
+        'csv_col_created': 'Created',
+        'csv_col_modified': 'Modified',
+        'csv_col_accessed': 'Accessed',
+        'csv_excel_hint': 'Tip: If date columns show "#####" in Excel, drag the column wider — the data is correct, the default width is just too narrow.',
+        'metadata_txt_hint': 'Note: TXT format does not support metadata export (CSV/JSON only).',
+        'exporting': 'Exporting...',
+        'export_progress': 'Exporting %v / %m',
+        'export_lang_label': 'Lang: ',
     },
     'zh': {
         'title': 'DirText v3.0',
@@ -142,12 +158,48 @@ T = {
         'csv_col_level': '层级',
         'csv_type_dir': '文件夹',
         'csv_type_file': '文件',
+        'metadata': '元数据',
+        'metadata_title': '导出元数据选项',
+        'metadata_prompt': '选择导出时需要附带的元数据：',
+        'metadata_size': '文件大小',
+        'metadata_created': '创建日期',
+        'metadata_modified': '修改日期',
+        'metadata_accessed': '访问日期',
+        'csv_col_size': '大小',
+        'csv_col_created': '创建时间',
+        'csv_col_modified': '修改时间',
+        'csv_col_accessed': '访问时间',
+        'csv_excel_hint': '提示：如果 Excel 中日期列显示为"#####"，请拖宽列宽即可正常显示（数据本身无误，只是默认列宽不够）。',
+        'metadata_txt_hint': '注意：TXT 格式不支持元数据导出（仅 CSV / JSON 支持）。',
+        'exporting': '正在导出...',
+        'export_progress': '正在导出 %v / %m',
+        'export_lang_label': '导出语言：',
     }
 }
 
-def t(key, **kw):
-    s = T.get(LANG, T['en']).get(key, key)
+def t(key, lang=None, **kw):
+    s = T.get(lang or LANG, T['en']).get(key, key)
     return s.format(**kw) if kw else s
+
+
+def format_size(bytes_val):
+    if bytes_val is None or bytes_val == 0:
+        return '0 B'
+    units = ['B', 'KB', 'MB', 'GB', 'TB']
+    i = 0
+    size = float(bytes_val)
+    while size >= 1024 and i < len(units) - 1:
+        size /= 1024
+        i += 1
+    if i == 0:
+        return f'{int(size)} B'
+    return f'{size:.1f} {units[i]}'
+
+
+def format_timestamp(ts):
+    if not ts:
+        return ''
+    return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
 
 
 # ---------- 样式常量 / Style Constants ----------
@@ -413,7 +465,7 @@ class ScanWorker(QThread):
         self.folders = folders
         self.recursion_depth = recursion_depth
         self._abort = False
-        self.structured_data = []  # (folder_root, name, full_path, is_dir, level)
+        self.structured_data = []  # list of dicts with folder/name/path/type/level/size/created/modified/accessed
 
     def abort(self):
         self._abort = True
@@ -495,7 +547,13 @@ class ScanWorker(QThread):
                 lines.append(f"{prefix}{connector}{entry.name}/")
                 dir_count += 1
                 if root is not None:
-                    self.structured_data.append((root, entry.name, entry.path, True, current_depth))
+                    st = self._safe_stat(entry)
+                    self.structured_data.append({
+                        'folder': root, 'name': entry.name, 'path': entry.path,
+                        'type': 'dir', 'level': current_depth,
+                        'size': st['size'], 'created': st['created'],
+                        'modified': st['modified'], 'accessed': st['accessed'],
+                    })
                 if max_depth == -1 or current_depth < max_depth:
                     sub_lines, sub_dirs, sub_files = self._walk_dir(
                         entry.path, max_depth, current_depth + 1, prefix + child_prefix, root)
@@ -506,9 +564,28 @@ class ScanWorker(QThread):
                 lines.append(f"{prefix}{connector}{entry.name}")
                 file_count += 1
                 if root is not None:
-                    self.structured_data.append((root, entry.name, entry.path, False, current_depth))
+                    st = self._safe_stat(entry)
+                    self.structured_data.append({
+                        'folder': root, 'name': entry.name, 'path': entry.path,
+                        'type': 'file', 'level': current_depth,
+                        'size': st['size'], 'created': st['created'],
+                        'modified': st['modified'], 'accessed': st['accessed'],
+                    })
 
         return lines, dir_count, file_count
+
+    @staticmethod
+    def _safe_stat(entry):
+        try:
+            st = entry.stat()
+            return {
+                'size': st.st_size,
+                'created': st.st_ctime,
+                'modified': st.st_mtime,
+                'accessed': st.st_atime,
+            }
+        except OSError:
+            return {'size': 0, 'created': 0, 'modified': 0, 'accessed': 0}
 
 
 # ---------- 导出格式选择对话框 / Export Format Dialog ----------
@@ -600,6 +677,75 @@ class ExportFormatDialog(QDialog):
         self.accept()
 
 
+class MetadataDialog(QDialog):
+    def __init__(self, parent=None, current_options=None):
+        super().__init__(parent)
+        self.options = dict(current_options) if current_options else {
+            'size': False, 'created': False, 'modified': False, 'accessed': False,
+        }
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle(t('metadata_title'))
+        self.setFixedSize(320, 280)
+        self.setStyleSheet(f"QDialog {{ background: {BG}; }}")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 15, 20, 10)
+        layout.setSpacing(8)
+
+        prompt = QLabel(t('metadata_prompt'))
+        prompt.setStyleSheet(f"color: {FG}; font-size: 10pt; background: transparent;")
+        layout.addWidget(prompt)
+
+        hint = QLabel(t('metadata_txt_hint'))
+        hint.setStyleSheet(f"color: {FG2}; font-size: 9pt; background: transparent;")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        checkbox_style = f"color: {FG}; font-size: 10pt; background: transparent;"
+
+        self.cb_size = QCheckBox(t('metadata_size'))
+        self.cb_size.setChecked(self.options.get('size', False))
+        self.cb_size.setStyleSheet(checkbox_style)
+        layout.addWidget(self.cb_size)
+
+        self.cb_created = QCheckBox(t('metadata_created'))
+        self.cb_created.setChecked(self.options.get('created', False))
+        self.cb_created.setStyleSheet(checkbox_style)
+        layout.addWidget(self.cb_created)
+
+        self.cb_modified = QCheckBox(t('metadata_modified'))
+        self.cb_modified.setChecked(self.options.get('modified', False))
+        self.cb_modified.setStyleSheet(checkbox_style)
+        layout.addWidget(self.cb_modified)
+
+        self.cb_accessed = QCheckBox(t('metadata_accessed'))
+        self.cb_accessed.setChecked(self.options.get('accessed', False))
+        self.cb_accessed.setStyleSheet(checkbox_style)
+        layout.addWidget(self.cb_accessed)
+
+        layout.addSpacing(6)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        for text, slot in [('OK', self._accept), ('Cancel', self.reject)]:
+            btn = AnimatedButton(text)
+            btn.setStyleSheet(BTN_STYLE)
+            btn.clicked.connect(slot)
+            btn_layout.addWidget(btn)
+        layout.addLayout(btn_layout)
+
+    def _accept(self):
+        self.options = {
+            'size': self.cb_size.isChecked(),
+            'created': self.cb_created.isChecked(),
+            'modified': self.cb_modified.isChecked(),
+            'accessed': self.cb_accessed.isChecked(),
+        }
+        self.accept()
+
+
 # ---------- 主应用 / Main Application ----------
 class DirTextApp(QMainWindow):
     def __init__(self):
@@ -613,6 +759,10 @@ class DirTextApp(QMainWindow):
         self._worker = None
         self._scanning = False
         self.structured_data = []
+        self.metadata_options = {
+            'size': False, 'created': False, 'modified': False, 'accessed': False,
+        }
+        self.export_lang = LANG
         self._depth_timer = QTimer(self)
         self._depth_timer.setSingleShot(True)
         self._depth_timer.setInterval(1000)
@@ -720,7 +870,7 @@ class DirTextApp(QMainWindow):
 
     def _setup_window(self):
         self.setWindowTitle(t('title'))
-        self.setMinimumSize(700, 500)
+        self.setMinimumSize(780, 500)
         self.setStyleSheet(f"QMainWindow {{ background: {BG}; }}")
         self.setAcceptDrops(True)
 
@@ -732,10 +882,39 @@ class DirTextApp(QMainWindow):
         self.setCentralWidget(central)
 
     def _setup_header(self, layout):
+        header_row = QHBoxLayout()
+        header_row.setSpacing(0)
+
+        self.btn_export_lang = QPushButton('EN' if self.export_lang == 'zh' else '中文')
+        self.btn_export_lang.setFixedSize(46, 22)
+        self.btn_export_lang.setStyleSheet(f"""
+            QPushButton {{
+                font-size: 8pt; padding: 0px;
+                background: {SURFACE}; color: {FG2};
+                border: 1px solid #d1d1d6; border-radius: 3px;
+            }}
+            QPushButton:hover {{ color: {FG}; border-color: #007aff; }}
+        """)
+        self.btn_export_lang.clicked.connect(self._toggle_export_lang)
+        header_row.addWidget(self.btn_export_lang)
+
+        self.lbl_export_lang = QLabel(t('export_lang_label'))
+        self.lbl_export_lang.setStyleSheet(f"color: {FG2}; font-size: 8pt; background: transparent;")
+        header_row.addWidget(self.lbl_export_lang)
+        header_row.addStretch()
+
         header = QLabel(t('header'))
         header.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {FG}; background: transparent;")
         header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(header)
+        header_row.addWidget(header)
+        header_row.addStretch()
+
+        # spacer to balance the button+label width, keeping title centered
+        spacer = QWidget()
+        spacer.setFixedWidth(105)
+        header_row.addWidget(spacer)
+
+        layout.addLayout(header_row)
 
         subtitle = QLabel(t('subtitle'))
         subtitle.setStyleSheet(f"font-size: 9pt; color: {FG2}; background: transparent;")
@@ -825,6 +1004,11 @@ class DirTextApp(QMainWindow):
         self.btn_export.setStyleSheet(BTN_STYLE)
         self.btn_export.clicked.connect(self.export)
         btn_layout.addWidget(self.btn_export)
+
+        self.btn_metadata = AnimatedButton(t('metadata'))
+        self.btn_metadata.setStyleSheet(BTN_STYLE)
+        self.btn_metadata.clicked.connect(self._show_metadata_dialog)
+        btn_layout.addWidget(self.btn_metadata)
 
         btn_layout.addStretch()
 
@@ -1044,6 +1228,15 @@ class DirTextApp(QMainWindow):
         self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
 
+    def _toggle_export_lang(self):
+        self.export_lang = 'en' if self.export_lang == 'zh' else 'zh'
+        self.btn_export_lang.setText('EN' if self.export_lang == 'zh' else '中文')
+
+    def _show_metadata_dialog(self):
+        dlg = MetadataDialog(self, current_options=self.metadata_options)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.metadata_options = dlg.options
+
     def export(self):
         content = self.preview.toPlainText().strip()
         if not content or content.startswith(t('welcome')[:20]):
@@ -1087,23 +1280,61 @@ class DirTextApp(QMainWindow):
         )
         if not fname:
             return
+        total = len(self.structured_data)
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat(t('export_progress'))
+        self.progress_bar.show()
+        self.status.showMessage(t('exporting'))
+        el = self.export_lang
         try:
             with open(fname, 'w', encoding='utf-8-sig', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([
-                    t('csv_col_folder'), t('csv_col_name'), t('csv_col_path'),
-                    t('csv_col_type'), t('csv_col_level'),
-                ])
-                for root, name, path, is_dir, level in self.structured_data:
-                    writer.writerow([
-                        root, name, path,
-                        t('csv_type_dir') if is_dir else t('csv_type_file'),
-                        level,
-                    ])
-            QMessageBox.information(self, 'Success', t('success', path=fname))
+                meta = self.metadata_options
+                headers = [
+                    t('csv_col_folder', lang=el), t('csv_col_name', lang=el), t('csv_col_path', lang=el),
+                    t('csv_col_type', lang=el), t('csv_col_level', lang=el),
+                ]
+                if meta.get('size'):
+                    headers.append(t('csv_col_size', lang=el))
+                if meta.get('created'):
+                    headers.append(t('csv_col_created', lang=el))
+                if meta.get('modified'):
+                    headers.append(t('csv_col_modified', lang=el))
+                if meta.get('accessed'):
+                    headers.append(t('csv_col_accessed', lang=el))
+                writer.writerow(headers)
+
+                for i, entry in enumerate(self.structured_data):
+                    row = [
+                        entry['folder'], entry['name'], entry['path'],
+                        t('csv_type_dir', lang=el) if entry['type'] == 'dir' else t('csv_type_file', lang=el),
+                        entry['level'],
+                    ]
+                    if meta.get('size'):
+                        if entry['type'] == 'file':
+                            row.append(f"{entry['size']} B")
+                        else:
+                            row.append('')
+                    if meta.get('created'):
+                        row.append(format_timestamp(entry['created']))
+                    if meta.get('modified'):
+                        row.append(format_timestamp(entry['modified']))
+                    if meta.get('accessed'):
+                        row.append(format_timestamp(entry['accessed']))
+                    writer.writerow(row)
+                    if i % 50 == 0:
+                        self.progress_bar.setValue(i + 1)
+                self.progress_bar.setValue(total)
+            success_msg = t('success', path=fname)
+            if any(meta.get(k) for k in ('created', 'modified', 'accessed')):
+                success_msg += '\n\n' + t('csv_excel_hint')
+            QMessageBox.information(self, 'Success', success_msg)
             self.status.showMessage(os.path.basename(fname))
         except Exception as e:
             QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
+        finally:
+            self.progress_bar.hide()
 
     def _export_json(self, timestamp):
         fname, _ = QFileDialog.getSaveFileName(
@@ -1113,22 +1344,57 @@ class DirTextApp(QMainWindow):
         )
         if not fname:
             return
+        total = len(self.structured_data)
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat(t('export_progress'))
+        self.progress_bar.show()
+        self.status.showMessage(t('exporting'))
+        el = self.export_lang
         try:
+            meta = self.metadata_options
             data = []
-            for root, name, path, is_dir, level in self.structured_data:
-                data.append({
-                    t('csv_col_folder'): root,
-                    t('csv_col_name'): name,
-                    t('csv_col_path'): path,
-                    t('csv_col_type'): t('csv_type_dir') if is_dir else t('csv_type_file'),
-                    t('csv_col_level'): level,
-                })
+            for i, entry in enumerate(self.structured_data):
+                item = {
+                    t('csv_col_folder', lang=el): entry['folder'],
+                    t('csv_col_name', lang=el): entry['name'],
+                    t('csv_col_path', lang=el): entry['path'],
+                    t('csv_col_type', lang=el): t('csv_type_dir', lang=el) if entry['type'] == 'dir' else t('csv_type_file', lang=el),
+                    t('csv_col_level', lang=el): entry['level'],
+                }
+                if meta.get('size'):
+                    item['size_bytes'] = entry['size'] if entry['type'] == 'file' else 0
+                    item['size'] = format_size(entry['size']) if entry['type'] == 'file' else '-'
+                if meta.get('created'):
+                    item['created'] = format_timestamp(entry['created'])
+                    item['created_timestamp'] = entry['created']
+                if meta.get('modified'):
+                    item['modified'] = format_timestamp(entry['modified'])
+                    item['modified_timestamp'] = entry['modified']
+                if meta.get('accessed'):
+                    item['accessed'] = format_timestamp(entry['accessed'])
+                    item['accessed_timestamp'] = entry['accessed']
+                data.append(item)
+                if i % 50 == 0:
+                    self.progress_bar.setValue(i + 1)
+            self.progress_bar.setValue(total)
+
+            export = {
+                'export_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'folders': self.folders,
+                'total_folders': len(self.folders),
+                'total_dirs': sum(1 for e in self.structured_data if e['type'] == 'dir'),
+                'total_files': sum(1 for e in self.structured_data if e['type'] == 'file'),
+                'entries': data,
+            }
             with open(fname, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(export, f, ensure_ascii=False, indent=2)
             QMessageBox.information(self, 'Success', t('success', path=fname))
             self.status.showMessage(os.path.basename(fname))
         except Exception as e:
             QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
+        finally:
+            self.progress_bar.hide()
 
 
 # ---------- 入口 / Entry Point ----------
