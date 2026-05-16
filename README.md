@@ -58,7 +58,8 @@ Built with PyQt6. Auto-detects system language (English / Chinese). No installat
 
 ## 🖼️ Screenshots
 
-> *(Drag and drop screenshot images here in the GitHub editor to upload)*
+<img width="1405" height="694" alt="image" src="https://github.com/user-attachments/assets/4cd8be56-b72f-4115-a7a2-b578c5ed2d53" />
+
 
 ---
 
