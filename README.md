@@ -1,3 +1,4 @@
+This project was developed with Claude Code.
 # DirText
 
 A lightweight, beautiful and fast directory tree export tool.
