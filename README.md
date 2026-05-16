@@ -21,6 +21,9 @@ Built with PyQt6. Auto-detects system language (English / Chinese). No installat
 | 📋 **Clipboard Auto-detect** | Automatically recognizes valid folder paths copied to clipboard on startup |
 | 🔍 **Recursion Depth Control** | Free text input for recursion depth. `0` = current level only, `-1` = all levels. 1-second debounce auto-scan |
 | 💾 **Export Format Selection** | Choose between **TXT** (tree text), **CSV** (table), **JSON** (structured data) before saving |
+| 📊 **Metadata Export** | Optional metadata for CSV/JSON: file size, creation date, modification date, last access date |
+| 🌐 **Export Language Toggle** | Switch export content language (EN / 中文) independently from the UI language |
+| 📈 **Export Progress Bar** | Real-time progress bar for CSV/JSON exports with status updates |
 | 🌐 **Auto Bilingual UI** | Interface automatically switches between English and Chinese based on system locale |
 | ⚡ **Real-time Preview** | Live preview of directory tree while scanning |
 
@@ -46,6 +49,10 @@ Built with PyQt6. Auto-detects system language (English / Chinese). No installat
 3. **Set recursion depth** in the text field (default `0` = current level)
 4. **Preview** the generated tree in real-time
 5. Click **"Export"** → choose **TXT / CSV / JSON** → save with auto-generated timestamp
+6. *(CSV/JSON only)* Click **"Metadata"** to optionally include file size, creation, modification and access dates
+7. *(Optional)* Use the top-left **EN / 中文** toggle to change the export file language without affecting the UI
+
+> 💡 **Tip:** If date columns show as `####` when opening CSV in Excel, simply widen the column width.
 
 ---
 
@@ -84,6 +91,10 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 - **Export Format Selection** — Choose TXT, CSV, or JSON before saving
 - **Drag & Drop Support** — Drop folders anywhere in the window to auto-scan
 - **Free Recursion Input** — Replaced dropdown with text input + 1s debounce auto-scan
+- **Metadata Export** — Optional file size, creation, modification and access dates for CSV/JSON exports
+- **Export Language Toggle** — Switch export content language (EN / 中文) independently from UI language
+- **Export Progress Bar** — Real-time progress indicator for CSV/JSON exports
+- **CSV Excel Compatibility Tip** — Post-export reminder for Excel date column width
 - **Updated Welcome Page** — Added usage instructions for new features
 
 ### v3.0
@@ -97,7 +108,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 🏷️ Keywords / Tags
 
-`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `json-export` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop`
+`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `json-export` `metadata-export` `file-metadata` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop`
 
 ---
 
@@ -128,6 +139,9 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 | 📋 **剪贴板自动识别** | 启动时自动检测剪贴板中的有效文件夹路径 |
 | 🔍 **递归深度自由输入** | 文本框输入递归层数，`0` = 仅当前层，`-1` = 全部层级，输入停止后 1 秒自动触发扫描 |
 | 💾 **导出格式选择** | 导出前可选择 **TXT**（树形文本）、**CSV**（表格）、**JSON**（结构化数据） |
+| 📊 **元数据导出** | CSV/JSON 可选导出文件大小、创建日期、修改日期、访问日期 |
+| 🌐 **导出语言切换** | 左上角切换导出文件语言（EN / 中文），不影响程序界面语言 |
+| 📈 **导出进度条** | CSV/JSON 导出时底部显示精确进度条与状态提示 |
 | 🌐 **自动双语界面** | 根据系统区域设置自动切换英文/中文界面 |
 | ⚡ **实时预览** | 扫描过程中实时预览目录树结构 |
 
@@ -153,6 +167,10 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 3. 在递归深度输入框中设置层数（默认 `0` = 仅当前层）
 4. **实时预览** 生成的目录树
 5. 点击 **"导出文本"** → 选择 **TXT / CSV / JSON** → 自动带时间戳保存
+6. *（CSV/JSON 专属）* 点击 **"元数据"** 按钮，可选择附带文件大小、创建/修改/访问日期
+7. *（可选）* 点击左上角 **EN / 中文** 切换导出文件语言，不影响程序界面
+
+> 💡 **提示：** 若 CSV 用 Excel 打开后日期列显示 `####`，拖宽列宽即可正常显示。
 
 ---
 
@@ -191,6 +209,10 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 - **导出格式选择** — 支持 TXT、CSV、JSON 三种格式
 - **拖拽文件夹支持** — 拖入窗口任意区域即可自动添加扫描，重复文件夹自动跳过
 - **递归深度自由输入** — 替换下拉框为文本输入，带 1 秒防抖自动扫描
+- **元数据导出** — CSV/JSON 支持可选导出文件大小、创建/修改/访问日期
+- **导出语言切换** — 可独立切换导出文件语言（EN / 中文），不影响界面语言
+- **导出进度条** — CSV/JSON 导出时显示实时进度条与状态栏提示
+- **CSV Excel 兼容提示** — 导出完成后提示 Excel 日期列宽问题
 - **欢迎页面更新** — 新增使用说明
 
 ### v3.0
@@ -204,7 +226,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 🏷️ 关键词 / 标签
 
-`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `JSON导出` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持`
+`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `JSON导出` `元数据导出` `文件元数据` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持`
 
 ---
 
