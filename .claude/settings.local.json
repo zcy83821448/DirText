@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell(python -c \"import py_compile; py_compile.compile\\(r'D:\\\\AAA Other\\\\DirText\\\\dirtext.py', doraise=True\\); print\\('Syntax OK'\\)\")"
-    ]
-  }
-}
