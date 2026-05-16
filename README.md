@@ -1,4 +1,4 @@
-# DirText v3.6
+# DirText v3.7
 
 [![Release](https://img.shields.io/github/v/release/zcy83821448/DirText)](https://github.com/zcy83821448/DirText/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)](https://github.com/zcy83821448/DirText)
@@ -26,6 +26,9 @@ Built with PyQt6. Auto-detects system language (English / Chinese). No installat
 | 📈 **Export Progress Bar** | Real-time progress bar for CSV/JSON exports with status updates |
 | 🌐 **Auto Bilingual UI** | Interface automatically switches between English and Chinese based on system locale |
 | ⚡ **Real-time Preview** | Live preview of directory tree while scanning |
+| 🌙 **Dark Mode** | One-click toggle between dark and light themes |
+| 📋 **Click to Copy Path** | Click any file or folder in the preview window to copy its full path to clipboard |
+| 🚫 **Custom Ignore Patterns** | Ignore specific file extensions; users can customize their own ignore list |
 
 ---
 
@@ -51,6 +54,8 @@ Built with PyQt6. Auto-detects system language (English / Chinese). No installat
 5. Click **"Export"** → choose **TXT / CSV / JSON** → save with auto-generated timestamp
 6. *(CSV/JSON only)* Click **"Metadata"** to optionally include file size, creation, modification and access dates
 7. *(Optional)* Use the top-left **EN / 中文** toggle to change the export file language without affecting the UI
+8. *(Optional)* Click the **theme toggle** to switch between light and dark mode
+9. *(Optional)* Click **"Ignore"** to set custom file extensions to exclude from scanning
 
 > 💡 **Tip:** If date columns show as `####` when opening CSV in Excel, simply widen the column width.
 
@@ -88,6 +93,11 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 📝 Changelog
 
+### v3.7
+- **Dark Mode** — One-click toggle between dark and light themes
+- **Click to Copy Path** — Click any file or folder in the preview tree to copy its full path to clipboard
+- **Custom Ignore Patterns** — Support for ignoring specific file extensions with a user-customizable ignore list
+
 ### v3.5
 - **Export Format Selection** — Choose TXT, CSV, or JSON before saving
 - **Drag & Drop Support** — Drop folders anywhere in the window to auto-scan
@@ -109,7 +119,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 🏷️ Keywords / Tags
 
-`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `json-export` `metadata-export` `file-metadata` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop`
+`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `json-export` `metadata-export` `file-metadata` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop` `dark-mode` `ignore-patterns`
 
 ---
 
@@ -123,7 +133,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 <a name="中文说明"></a>
 
-# DirText v3.6 中文说明
+# DirText v3.7 中文说明
 
 轻量级 Windows GUI 工具，扫描文件夹结构并导出为 **TXT 树形文本**、**CSV 表格** 或 **JSON 结构化数据**。
 
@@ -145,6 +155,9 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 | 📈 **导出进度条** | CSV/JSON 导出时底部显示精确进度条与状态提示 |
 | 🌐 **自动双语界面** | 根据系统区域设置自动切换英文/中文界面 |
 | ⚡ **实时预览** | 扫描过程中实时预览目录树结构 |
+| 🌙 **深色模式** | 一键切换深色/浅色主题 |
+| 📋 **点击复制路径** | 预览窗口中点击任意文件或文件夹，即可复制其完整路径到剪贴板 |
+| 🚫 **自定义忽略规则** | 支持按文件后缀名忽略特定文件，用户可自定义忽略列表 |
 
 ---
 
@@ -170,6 +183,8 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 5. 点击 **"导出文本"** → 选择 **TXT / CSV / JSON** → 自动带时间戳保存
 6. *（CSV/JSON 专属）* 点击 **"元数据"** 按钮，可选择附带文件大小、创建/修改/访问日期
 7. *（可选）* 点击左上角 **EN / 中文** 切换导出文件语言，不影响程序界面
+8. *（可选）* 点击 **主题切换按钮** 在深色/浅色模式间切换
+9. *（可选）* 点击 **"忽略"** 按钮，设置需要排除扫描的特定文件后缀名
 
 > 💡 **提示：** 若 CSV 用 Excel 打开后日期列显示 `####`，拖宽列宽即可正常显示。
 
@@ -206,6 +221,11 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 📝 更新日志
 
+### v3.7
+- **深色模式** — 支持一键切换深色/浅色主题
+- **点击复制路径** — 预览树中点击任意文件或文件夹即可复制完整路径到剪贴板
+- **自定义忽略规则** — 支持按文件后缀名过滤，用户可自定义忽略列表
+
 ### v3.5
 - **导出格式选择** — 支持 TXT、CSV、JSON 三种格式
 - **拖拽文件夹支持** — 拖入窗口任意区域即可自动添加扫描，重复文件夹自动跳过
@@ -227,7 +247,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 🏷️ 关键词 / 标签
 
-`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `JSON导出` `元数据导出` `文件元数据` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持`
+`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `JSON导出` `元数据导出` `文件元数据` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持` `深色模式` `忽略规则`
 
 ---
 
