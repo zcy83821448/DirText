@@ -1,4 +1,4 @@
-# DirText v3.5
+# DirText v3.6
 
 [![Release](https://img.shields.io/github/v/release/zcy83821448/DirText)](https://github.com/zcy83821448/DirText/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)](https://github.com/zcy83821448/DirText)
@@ -122,7 +122,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 <a name="中文说明"></a>
 
-# DirText v3.5 中文说明
+# DirText v3.6 中文说明
 
 轻量级 Windows GUI 工具，扫描文件夹结构并导出为 **TXT 树形文本**、**CSV 表格** 或 **JSON 结构化数据**。
 
