@@ -1,4 +1,4 @@
-# DirText v3.7
+# DirText v3.8
 
 [![Release](https://img.shields.io/github/v/release/zcy83821448/DirText)](https://github.com/zcy83821448/DirText/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)](https://github.com/zcy83821448/DirText)
@@ -29,6 +29,8 @@ Built with PyQt6. Auto-detects system language (English / Chinese). No installat
 | 🌙 **Dark Mode** | One-click toggle between dark and light themes |
 | 📋 **Click to Copy Path** | Click any file or folder in the preview window to copy its full path to clipboard |
 | 🚫 **Custom Ignore Patterns** | Ignore specific file extensions; users can customize their own ignore list |
+| 🚀 **Multi-threaded Scanning** | Parallel directory scanning with ThreadPoolExecutor for faster performance |
+| 🎯 **Performance Optimized** | Preview line limit, reduced animation frame rate, and overall performance improvements |
 
 ---
 
@@ -93,6 +95,12 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 📝 Changelog
 
+### v3.8
+- **Multi-threaded Scanning** — Parallel directory scanning with ThreadPoolExecutor for significantly faster performance on large directories
+- **Preview Line Limit** — Preview window now limits to 5000 lines for smooth performance; full content available on export
+- **Smoother Theme Transitions** — Reduced animation frame rate for theme switching to improve performance
+- **Performance Optimizations** — Overall performance improvements and code refactoring
+
 ### v3.7
 - **Dark Mode** — One-click toggle between dark and light themes
 - **Click to Copy Path** — Click any file or folder in the preview tree to copy its full path to clipboard
@@ -119,7 +127,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 🏷️ Keywords / Tags
 
-`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `json-export` `metadata-export` `file-metadata` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop` `dark-mode` `ignore-patterns`
+`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `json-export` `metadata-export` `file-metadata` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop` `dark-mode` `ignore-patterns` `multi-threaded`
 
 ---
 
@@ -133,7 +141,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 <a name="中文说明"></a>
 
-# DirText v3.7 中文说明
+# DirText v3.8 中文说明
 
 轻量级 Windows GUI 工具，扫描文件夹结构并导出为 **TXT 树形文本**、**CSV 表格** 或 **JSON 结构化数据**。
 
@@ -158,6 +166,8 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 | 🌙 **深色模式** | 一键切换深色/浅色主题 |
 | 📋 **点击复制路径** | 预览窗口中点击任意文件或文件夹，即可复制其完整路径到剪贴板 |
 | 🚫 **自定义忽略规则** | 支持按文件后缀名忽略特定文件，用户可自定义忽略列表 |
+| 🚀 **多线程扫描** | 使用 ThreadPoolExecutor 并行扫描目录，大幅提升大目录扫描速度 |
+| 🎯 **性能优化** | 预览行数限制、降低主题切换帧率、整体性能提升与代码重构 |
 
 ---
 
@@ -221,6 +231,12 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 📝 更新日志
 
+### v3.8
+- **多线程扫描** — 使用 ThreadPoolExecutor 并行扫描目录，大幅提升大目录扫描速度
+- **预览行数限制** — 预览窗口限制为 5000 行以保证流畅性能，导出可查看完整内容
+- **主题切换优化** — 降低主题切换动画帧率，提升性能表现
+- **性能优化** — 整体性能提升与代码重构
+
 ### v3.7
 - **深色模式** — 支持一键切换深色/浅色主题
 - **点击复制路径** — 预览树中点击任意文件或文件夹即可复制完整路径到剪贴板
@@ -247,7 +263,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 🏷️ 关键词 / 标签
 
-`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `JSON导出` `元数据导出` `文件元数据` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持` `深色模式` `忽略规则`
+`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `JSON导出` `元数据导出` `文件元数据` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持` `深色模式` `忽略规则` `多线程`
 
 ---
 
