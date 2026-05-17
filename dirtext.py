@@ -14,9 +14,11 @@ import locale
 import os
 import platform
 import re
+import subprocess
 import sys
 import threading
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
@@ -27,7 +29,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QProgressBar, QHeaderView, QGraphicsOpacityEffect,
     QLineEdit, QCheckBox, QListWidget
 )
-from PyQt6.QtCore import Qt, QTimer, QSortFilterProxyModel, QDir, QPropertyAnimation, QEasingCurve, pyqtSignal, QThread
+from PyQt6.QtCore import Qt, QTimer, QSortFilterProxyModel, QDir, QPropertyAnimation, QEasingCurve, QPoint, pyqtSignal, QThread
 from PyQt6.QtGui import QColor, QFileSystemModel, QFont, QPalette
 
 # ---------- 预览行数限制 / Preview Line Limit ----------
@@ -67,7 +69,7 @@ T = {
         'clear': 'Clear',
         'export': 'Export',
         'ready': 'Ready',
-        'welcome': "Welcome to Directory to Text\n\nInstructions:\n  1. Click 'Add Folder' or drag folders onto the window\n  2. Set depth in 'Recursion [N] Levels' (-1 = all, 0 = current)\n  3. Preview area shows the content\n  4. Click 'Export' to save\n  5. Click any file/dir name in preview to copy its path\n\nClick a button to get started",
+        'welcome': "Welcome to Directory to Text\n\nInstructions:\n  1. Click 'Add Folder' or drag folders onto the window\n  2. Set depth in 'Recursion [N] Levels' (-1 = all, 0 = current)\n  3. Preview area shows the content\n  4. Click 'Export' to save\n  5. Right-click any file/dir name in preview for options\n     (Copy Path / Open File / Show in Explorer)\n\nClick a button to get started",
         'dup_folder': 'This folder is already in the list!',
         'no_content': 'No content to export!',
         'save_title': 'Save file list',
@@ -127,6 +129,28 @@ T = {
         'ignore_hint': 'Supports wildcards (*.log, *.tmp). One pattern per line.',
         'ignore_add': 'Add',
         'ignore_remove': 'Remove',
+        'search_placeholder': 'Search files...',
+        'filter_result': 'Search: "{text}" → {count} items',
+        'no_filter_match': 'No matches found',
+        'copy_path': 'Copy Path',
+        'open_file': 'Open File',
+        'show_in_explorer': 'Show in Explorer',
+        'filter': 'Filter',
+        'ignore_filter': 'Ignore/Filter',
+        'filter_title': 'Filter Criteria',
+        'filter_time_start': 'Start:',
+        'filter_time_end': 'End:',
+        'filter_time_hint': 'YYYY-MM-DD HH:MM  (leave empty = no limit)',
+        'filter_size_label': 'File Size:',
+        'filter_size_min': 'Min (KB)',
+        'filter_size_max': 'Max (KB)',
+        'filter_size_hint': 'Leave empty = no limit  (1 MB = 1024 KB)',
+        'filter_clear': 'Clear',
+        'xlsx_save_title': 'Save Excel file list',
+        'xlsx_file_name': 'file_list_{ts}.xlsx',
+        'xlsx_no_module': 'This feature requires the openpyxl library.\n\nInstall it with:\npip install openpyxl',
+        'format_xlsx': 'Excel File (.xlsx)',
+        'filter_active': '● Filters active',
     },
     'zh': {
         'title': 'DirText v3.6',
@@ -136,7 +160,7 @@ T = {
         'clear': '清空选择',
         'export': '导出文本',
         'ready': '就绪',
-        'welcome': '欢迎使用文件目录提取器\n\n使用说明：\n  1. 点击「添加文件夹」或拖入文件夹到窗口\n  2. 在"递归【N】层"中设置深度（-1 = 全部，0 = 当前层）\n  3. 预览区显示内容\n  4. 点击「导出文本」保存\n  5. 在预览中点击任意文件/文件夹名称即可复制路径\n\n点击按钮开始使用吧',
+        'welcome': '欢迎使用文件目录提取器\n\n使用说明：\n  1. 点击「添加文件夹」或拖入文件夹到窗口\n  2. 在"递归【N】层"中设置深度（-1 = 全部，0 = 当前层）\n  3. 预览区显示内容\n  4. 点击「导出文本」保存\n  5. 在预览中右键任意文件/文件夹名称即可：\n     复制路径 / 打开文件 / 在资源管理器中显示\n\n点击按钮开始使用吧',
         'dup_folder': '该文件夹已在列表中！',
         'no_content': '没有可导出的内容！',
         'save_title': '保存文件列表',
@@ -196,6 +220,28 @@ T = {
         'ignore_hint': '支持通配符（*.log、*.tmp）。每行一个模式。',
         'ignore_add': '添加',
         'ignore_remove': '移除',
+        'search_placeholder': '搜索文件...',
+        'filter_result': '搜索："{text}" → {count} 项',
+        'no_filter_match': '未找到匹配项',
+        'copy_path': '复制路径',
+        'open_file': '打开文件',
+        'show_in_explorer': '在资源管理器中显示',
+        'filter': '筛选',
+        'ignore_filter': '忽略/筛选',
+        'filter_title': '筛选条件',
+        'filter_time_start': '起始：',
+        'filter_time_end': '截止：',
+        'filter_time_hint': '年-月-日 时:分  （留空=不限制）',
+        'filter_size_label': '文件大小：',
+        'filter_size_min': '最小 (KB)',
+        'filter_size_max': '最大 (KB)',
+        'filter_size_hint': '留空=不限制  （1 MB = 1024 KB）',
+        'filter_clear': '清除',
+        'xlsx_save_title': '保存 Excel 文件列表',
+        'xlsx_file_name': '文件列表_{ts}.xlsx',
+        'xlsx_no_module': '此功能需要 openpyxl 库。\n\n请使用以下命令安装：\npip install openpyxl',
+        'format_xlsx': 'Excel 文件 (.xlsx)',
+        'filter_active': '● 筛选已激活',
     }
 }
 
@@ -800,7 +846,7 @@ class ExportFormatDialog(QDialog):
 
     def _setup_ui(self):
         self.setWindowTitle(t('export_format'))
-        self.setFixedSize(300, 195)
+        self.setFixedSize(300, 235)
         self.setStyleSheet(f"QDialog {{ background: {C['bg']}; }}")
 
         layout = QVBoxLayout(self)
@@ -824,6 +870,10 @@ class ExportFormatDialog(QDialog):
         self.opt_json.toggled.connect(lambda: self._on_option_toggled('json'))
         layout.addWidget(self.opt_json)
 
+        self.opt_xlsx = FormatOption(t('format_xlsx'))
+        self.opt_xlsx.toggled.connect(lambda: self._on_option_toggled('xlsx'))
+        layout.addWidget(self.opt_xlsx)
+
         layout.addSpacing(6)
 
         btn_layout = QHBoxLayout()
@@ -840,6 +890,7 @@ class ExportFormatDialog(QDialog):
         self.opt_txt.set_selected(fmt == 'txt')
         self.opt_csv.set_selected(fmt == 'csv')
         self.opt_json.set_selected(fmt == 'json')
+        self.opt_xlsx.set_selected(fmt == 'xlsx')
 
     def _accept(self):
         self.accept()
@@ -916,9 +967,13 @@ class MetadataDialog(QDialog):
 
 # ---------- 忽略列表对话框 / Ignore List Dialog ----------
 class IgnoreListDialog(QDialog):
-    def __init__(self, parent=None, patterns=None):
+    def __init__(self, parent=None, patterns=None, filter_criteria=None):
         super().__init__(parent)
         self.patterns = list(patterns) if patterns else []
+        self.filter_criteria = dict(filter_criteria) if filter_criteria else {
+            'time_start': '', 'time_end': '',
+            'size_min': '', 'size_max': '',
+        }
         self._setup_ui()
 
     def _setup_ui(self):
@@ -985,6 +1040,20 @@ class IgnoreListDialog(QDialog):
 
         layout.addSpacing(6)
 
+        filter_row = QHBoxLayout()
+        filter_row.setSpacing(8)
+        self.filter_status = QLabel()
+        self._update_filter_status()
+        filter_row.addWidget(self.filter_status)
+        filter_row.addStretch()
+        btn_filter = AnimatedButton(t('filter'))
+        btn_filter.setStyleSheet(_make_btn_style(C))
+        btn_filter.clicked.connect(self._open_filter)
+        filter_row.addWidget(btn_filter)
+        layout.addLayout(filter_row)
+
+        layout.addSpacing(4)
+
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         for text, slot in [('OK', self._accept), ('Cancel', self.reject)]:
@@ -993,6 +1062,22 @@ class IgnoreListDialog(QDialog):
             btn.clicked.connect(slot)
             btn_row.addWidget(btn)
         layout.addLayout(btn_row)
+
+    def _update_filter_status(self):
+        fc = self.filter_criteria
+        active = any(fc.get(k) for k in ('time_start', 'time_end', 'size_min', 'size_max'))
+        if active:
+            self.filter_status.setText(t('filter_active'))
+            self.filter_status.setStyleSheet(f"color: {C['accent_green']}; font-size: 9pt; background: transparent;")
+        else:
+            self.filter_status.setText('')
+            self.filter_status.setStyleSheet("background: transparent;")
+
+    def _open_filter(self):
+        dlg = FilterDialog(self, criteria=self.filter_criteria)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.filter_criteria = dlg.criteria
+            self._update_filter_status()
 
     def _add(self):
         text = self.input.text().strip()
@@ -1016,21 +1101,136 @@ class IgnoreListDialog(QDialog):
         self.accept()
 
 
+# ---------- 筛选条件对话框 / Filter Criteria Dialog ----------
+class FilterDialog(QDialog):
+    def __init__(self, parent=None, criteria=None):
+        super().__init__(parent)
+        self.criteria = dict(criteria) if criteria else {
+            'time_start': '', 'time_end': '',
+            'size_min': '', 'size_max': '',
+        }
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle(t('filter_title'))
+        self.setFixedSize(360, 250)
+        self.setStyleSheet(f"QDialog {{ background: {C['bg']}; }}")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 15, 20, 10)
+        layout.setSpacing(8)
+
+        label_style = f"color: {C['fg']}; font-size: 10pt; background: transparent;"
+        hint_style = f"color: {C['fg2']}; font-size: 8pt; background: transparent;"
+        input_style = f"""
+            QLineEdit {{
+                font-size: 10pt; padding: 4px 6px;
+                background: {C['surface']}; color: {C['fg']};
+                border: 1px solid {C['border']}; border-radius: 4px;
+            }}
+            QLineEdit:focus {{ border-color: {C['accent']}; }}
+        """
+
+        # Time range
+        layout.addWidget(QLabel(t('filter_time_start')))
+        time_row = QHBoxLayout()
+        time_row.setSpacing(6)
+        self.time_start = QLineEdit()
+        self.time_start.setPlaceholderText('2024-01-01 00:00')
+        self.time_start.setText(self.criteria.get('time_start', ''))
+        self.time_start.setStyleSheet(input_style)
+        time_row.addWidget(self.time_start)
+        self.time_end = QLineEdit()
+        self.time_end.setPlaceholderText('2024-12-31 23:59')
+        self.time_end.setText(self.criteria.get('time_end', ''))
+        self.time_end.setStyleSheet(input_style)
+        time_row.addWidget(self.time_end)
+        layout.addLayout(time_row)
+
+        time_hint = QLabel(t('filter_time_hint'))
+        time_hint.setStyleSheet(hint_style)
+        time_hint.setWordWrap(True)
+        layout.addWidget(time_hint)
+
+        layout.addSpacing(4)
+
+        # File size
+        size_label = QLabel(t('filter_size_label'))
+        size_label.setStyleSheet(label_style)
+        layout.addWidget(size_label)
+
+        size_row = QHBoxLayout()
+        size_row.setSpacing(6)
+        self.size_min = QLineEdit()
+        self.size_min.setPlaceholderText('0')
+        self.size_min.setText(self.criteria.get('size_min', ''))
+        self.size_min.setStyleSheet(input_style)
+        size_row.addWidget(self.size_min)
+
+        size_lbl_min = QLabel(t('filter_size_min'))
+        size_lbl_min.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
+        size_row.addWidget(size_lbl_min)
+
+        self.size_max = QLineEdit()
+        self.size_max.setPlaceholderText('')
+        self.size_max.setText(self.criteria.get('size_max', ''))
+        self.size_max.setStyleSheet(input_style)
+        size_row.addWidget(self.size_max)
+
+        size_lbl_max = QLabel(t('filter_size_max'))
+        size_lbl_max.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
+        size_row.addWidget(size_lbl_max)
+        layout.addLayout(size_row)
+
+        size_hint = QLabel(t('filter_size_hint'))
+        size_hint.setStyleSheet(hint_style)
+        size_hint.setWordWrap(True)
+        layout.addWidget(size_hint)
+
+        layout.addSpacing(6)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        btn_clear = AnimatedButton(t('filter_clear'))
+        btn_clear.setStyleSheet(_make_btn_style(C))
+        btn_clear.clicked.connect(self._clear)
+        btn_row.addWidget(btn_clear)
+
+        for text, slot in [('OK', self._accept), ('Cancel', self.reject)]:
+            btn = AnimatedButton(text)
+            btn.setStyleSheet(_make_btn_style(C))
+            btn.clicked.connect(slot)
+            btn_row.addWidget(btn)
+        layout.addLayout(btn_row)
+
+    def _clear(self):
+        self.time_start.clear()
+        self.time_end.clear()
+        self.size_min.clear()
+        self.size_max.clear()
+
+    def _accept(self):
+        self.criteria = {
+            'time_start': self.time_start.text().strip(),
+            'time_end': self.time_end.text().strip(),
+            'size_min': self.size_min.text().strip(),
+            'size_max': self.size_max.text().strip(),
+        }
+        self.accept()
+
+
 # ---------- 可点击预览 / Clickable Preview ----------
 class ClickablePreview(QPlainTextEdit):
-    lineClicked = pyqtSignal(int)
+    contextMenuRequested = pyqtSignal(int, QPoint)
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            cursor = self.cursorForPosition(event.pos())
-            block = cursor.block()
-            line = block.blockNumber()
-            if block.text().strip():
-                self.lineClicked.emit(line)
-        super().mouseReleaseEvent(event)
+    def contextMenuEvent(self, event):
+        cursor = self.cursorForPosition(event.pos())
+        block = cursor.block()
+        line = block.blockNumber()
+        if block.text().strip():
+            self.contextMenuRequested.emit(line, event.globalPos())
 
 
 # ---------- 主应用 / Main Application ----------
@@ -1049,6 +1249,7 @@ class DirTextApp(QMainWindow):
         self._scanning = False
         self.structured_data = []
         self._full_preview_text = ""
+        self._full_line_paths = []
         self._line_paths = []
         self._scan_total_dirs = 0
         self._scan_total_files = 0
@@ -1056,12 +1257,20 @@ class DirTextApp(QMainWindow):
             'size': False, 'created': False, 'modified': False, 'accessed': False,
         }
         self.ignore_patterns = list(self.cfg.get('ignore_patterns', []))
+        self.filter_criteria = dict(self.cfg.get('filter_criteria', {
+            'time_start': '', 'time_end': '',
+            'size_min': '', 'size_max': '',
+        }))
         self.export_lang = LANG
         self._copy_tip = None
         self._depth_timer = QTimer(self)
         self._depth_timer.setSingleShot(True)
         self._depth_timer.setInterval(1000)
         self._depth_timer.timeout.connect(self._apply_depth)
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(200)
+        self._filter_timer.timeout.connect(self._apply_filter)
         self._progress_timer = QTimer(self)
         self._progress_timer.setSingleShot(True)
         self._progress_timer.setInterval(100)
@@ -1109,6 +1318,7 @@ class DirTextApp(QMainWindow):
         self.setWindowOpacity(1.0)
         self._save_timer.stop()
         self._progress_timer.stop()
+        self._filter_timer.stop()
         self._remember_geometry()
         self._save_config()
         if self._worker is not None and self._worker.isRunning():
@@ -1178,6 +1388,7 @@ class DirTextApp(QMainWindow):
         layout.setContentsMargins(15, 15, 15, 10)
         layout.setSpacing(8)
         self._setup_header(layout)
+        self._setup_search_bar(layout)
         self._setup_preview(layout)
         self._setup_progress_bar(layout)
         self._setup_button_bar(layout)
@@ -1246,6 +1457,21 @@ class DirTextApp(QMainWindow):
         self._subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._subtitle_label)
 
+    def _setup_search_bar(self, layout):
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(t('search_placeholder'))
+        self.search_input.setClearButtonEnabled(True)
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 10pt; padding: 5px 8px;
+                background: {C['surface']}; color: {C['fg']};
+                border: 1px solid {C['border']}; border-radius: 4px;
+            }}
+            QLineEdit:focus {{ border-color: {C['accent']}; }}
+        """)
+        self.search_input.textChanged.connect(self._on_search_text_changed)
+        layout.addWidget(self.search_input)
+
     def _setup_preview(self, layout):
         self.preview_frame = QWidget()
         self.preview_frame.setObjectName("previewFrame")
@@ -1260,7 +1486,7 @@ class DirTextApp(QMainWindow):
 
         self.preview = ClickablePreview()
         self.preview.setReadOnly(True)
-        self.preview.lineClicked.connect(self._on_preview_line_clicked)
+        self.preview.contextMenuRequested.connect(self._on_preview_context_menu)
         self.preview.document().setDocumentMargin(10)
         self._apply_preview_colors(C)
         self._apply_preview_scrollbar(C)
@@ -1322,7 +1548,7 @@ class DirTextApp(QMainWindow):
         self.btn_metadata.clicked.connect(self._show_metadata_dialog)
         btn_layout.addWidget(self.btn_metadata)
 
-        self.btn_ignore = AnimatedButton(t('ignore'))
+        self.btn_ignore = AnimatedButton(t('ignore_filter'))
         self.btn_ignore.setStyleSheet(_make_btn_style(C))
         self.btn_ignore.clicked.connect(self._show_ignore_dialog)
         btn_layout.addWidget(self.btn_ignore)
@@ -1365,10 +1591,11 @@ class DirTextApp(QMainWindow):
         self.recursion_depth = 0
 
     # ----- 预览文本过渡 / Preview Text Transition -----
-    def _set_preview_text(self, text):
+    def _set_preview_text(self, text, save_full=True):
         """预览文本淡入淡出：淡出 → 换文本 → 淡入。超过 PREVIEW_LINE_LIMIT 行则截断预览。"""
         self._transition.stop_target(self._preview_effect)
-        self._full_preview_text = text
+        if save_full:
+            self._full_preview_text = text
         lines = text.split('\n')
         if len(lines) > PREVIEW_LINE_LIMIT:
             if LANG == 'en':
@@ -1393,17 +1620,24 @@ class DirTextApp(QMainWindow):
     def _show_welcome(self):
         self._set_preview_text(t('welcome'))
 
-    def _on_preview_line_clicked(self, line):
-        if line < len(self._line_paths):
-            path = self._line_paths[line]
-            if path is not None:
-                QApplication.clipboard().setText(path)
-                cursor = self.preview.textCursor()
-                block = self.preview.document().findBlockByLineNumber(line)
-                cursor.setPosition(block.position())
-                rect = self.preview.cursorRect(cursor)
-                pos = self.preview.mapToGlobal(rect.topLeft())
-                self._show_copy_tip(pos, t('path_copied', path=path))
+    def _on_preview_context_menu(self, line, global_pos):
+        if line >= len(self._line_paths):
+            return
+        path = self._line_paths[line]
+        if path is None or not os.path.exists(path):
+            return
+
+        def _copy_path():
+            QApplication.clipboard().setText(path)
+            self._show_copy_tip(global_pos, t('path_copied', path=path))
+
+        menu = self.preview.createStandardContextMenu()
+        menu.clear()
+        menu.addAction(t('copy_path'), _copy_path)
+        menu.addSeparator()
+        menu.addAction(t('open_file'), lambda: os.startfile(path))
+        menu.addAction(t('show_in_explorer'), lambda: subprocess.Popen(['explorer', '/select,', os.path.normpath(path)]))
+        menu.exec(global_pos)
 
     def _show_copy_tip(self, pos, text):
         if hasattr(self, '_copy_tip') and self._copy_tip:
@@ -1544,7 +1778,10 @@ class DirTextApp(QMainWindow):
         self.folders.clear()
         self.structured_data.clear()
         self._line_paths.clear()
+        self._full_line_paths.clear()
         self._full_preview_text = ""
+        self.filter_criteria = {'time_start': '', 'time_end': '', 'size_min': '', 'size_max': ''}
+        self.search_input.clear()
         self._show_welcome()
         self.status.showMessage(t('ready'))
 
@@ -1554,6 +1791,11 @@ class DirTextApp(QMainWindow):
         if self._scanning:
             return
         self._depth_timer.start()
+
+    def _on_search_text_changed(self):
+        if self._scanning:
+            return
+        self._filter_timer.start()
 
     def _apply_depth(self):
         if self._scanning:
@@ -1575,7 +1817,159 @@ class DirTextApp(QMainWindow):
 
         self.recursion_depth = new_depth
         self._scan()
-        
+
+    # ----- 搜索过滤 / Search Filter -----
+    def _parse_filter_criteria(self):
+        """Convert string filter criteria to typed values.
+        Returns (time_start, time_end, size_min_bytes, size_max_bytes)."""
+        fc = self.filter_criteria
+        time_start = None
+        time_end = None
+        size_min = None
+        size_max = None
+
+        for field in ('time_start', 'time_end'):
+            val = fc.get(field, '').strip()
+            if val:
+                for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%d', '%Y/%m/%d %H:%M', '%Y/%m/%d'):
+                    try:
+                        dt = datetime.strptime(val, fmt)
+                        if field == 'time_end' and fmt in ('%Y-%m-%d', '%Y/%m/%d'):
+                            dt = dt.replace(hour=23, minute=59, second=59)
+                        if field == 'time_start':
+                            time_start = dt
+                        else:
+                            time_end = dt
+                        break
+                    except ValueError:
+                        continue
+
+        for field in ('size_min', 'size_max'):
+            val = fc.get(field, '').strip()
+            if val:
+                try:
+                    kb = float(val)
+                    bytes_val = int(kb * 1024)
+                    if field == 'size_min':
+                        size_min = bytes_val
+                    else:
+                        size_max = bytes_val
+                except ValueError:
+                    pass
+
+        return time_start, time_end, size_min, size_max
+
+    def _get_filtered_entries(self):
+        """Return structured_data entries matching active time/size filters."""
+        time_start, time_end, size_min, size_max = self._parse_filter_criteria()
+        has_time = time_start is not None or time_end is not None
+        has_size = size_min is not None or size_max is not None
+
+        if not has_time and not has_size:
+            return self.structured_data
+
+        result = []
+        for entry in self.structured_data:
+            if has_time:
+                ts = entry.get('modified', 0)
+                if not ts:
+                    if time_start is not None:
+                        continue
+                else:
+                    dt = datetime.fromtimestamp(ts)
+                    if time_start is not None and dt < time_start:
+                        continue
+                    if time_end is not None and dt > time_end:
+                        continue
+
+            if has_size and entry['type'] == 'file':
+                size = entry.get('size', 0)
+                if size_min is not None and size < size_min:
+                    continue
+                if size_max is not None and size > size_max:
+                    continue
+
+            result.append(entry)
+        return result
+
+    def _build_filtered_display(self, matching, extra_line=None):
+        """Build filtered display lines and paths from matching entries."""
+        sep = '═' * 80
+        lines = []
+        line_paths = []
+
+        if not matching:
+            lines.append(sep)
+            line_paths.append(None)
+            lines.append(f'  {t("no_filter_match")}')
+            line_paths.append(None)
+            lines.append(sep)
+            line_paths.append(None)
+        else:
+            grouped = {}
+            for e in matching:
+                grouped.setdefault(e['folder'], []).append(e)
+
+            for i, folder in enumerate(self.folders):
+                if folder not in grouped:
+                    continue
+                entries = grouped[folder]
+                lines.append(sep)
+                line_paths.append(None)
+                if LANG == 'en':
+                    lines.append(f"Folder [{i + 1}]: {folder}")
+                else:
+                    lines.append(f"文件夹 [{i + 1}]：{folder}")
+                line_paths.append(None)
+                lines.append(sep)
+                line_paths.append(None)
+
+                entries.sort(key=lambda e: e['path'])
+                for entry in entries:
+                    try:
+                        rel = os.path.relpath(entry['path'], folder)
+                    except ValueError:
+                        rel = entry['path']
+                    if entry['type'] == 'dir':
+                        lines.append(f"  {rel}/")
+                    else:
+                        lines.append(f"  {rel}")
+                    line_paths.append(entry['path'])
+
+            lines.append(sep)
+            line_paths.append(None)
+            if extra_line:
+                lines.append(extra_line)
+                line_paths.append(None)
+
+        return lines, line_paths
+
+    def _apply_filter(self):
+        if not self._full_preview_text or not self.structured_data:
+            return
+
+        filtered = self._get_filtered_entries()
+        text = self.search_input.text().strip()
+        has_search = bool(text)
+        has_criteria = any(self.filter_criteria.get(k)
+                          for k in ('time_start', 'time_end', 'size_min', 'size_max'))
+
+        if not has_search and not has_criteria:
+            self._line_paths = list(self._full_line_paths)
+            self._set_preview_text(self._full_preview_text, save_full=False)
+            return
+
+        if has_search:
+            text_lower = text.lower()
+            matching = [e for e in filtered if text_lower in e['name'].lower()]
+        else:
+            matching = filtered
+
+        extra = t('filter_result', text=text, count=len(matching)) if has_search else None
+        lines, line_paths = self._build_filtered_display(matching, extra_line=extra)
+        self._line_paths = line_paths
+        self._set_preview_text('\n'.join(lines), save_full=False)
+
     # ----- 扫描状态管理 / Scan State Management -----
     def _set_scanning_state(self, scanning):
         self._scanning = scanning
@@ -1584,6 +1978,7 @@ class DirTextApp(QMainWindow):
         self.btn_export.setEnabled(not scanning)
         self.btn_ignore.setEnabled(not scanning)
         self.depth_input.setEnabled(not scanning)
+        self.search_input.setEnabled(not scanning)
         try:
             self.btn_clear.clicked.disconnect()
         except TypeError:
@@ -1631,7 +2026,9 @@ class DirTextApp(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self.progress_bar.setFormat('%p%')
-        self._set_preview_text("\n".join(lines))
+        self._full_preview_text = "\n".join(lines)
+        self._full_line_paths = list(self._line_paths)
+        self._apply_filter()
         msg = f"Scanned {len(self.folders)} folder(s)" if LANG == 'en' else f"已扫描 {len(self.folders)} 个文件夹"
         self.status.showMessage(msg)
 
@@ -1712,6 +2109,15 @@ class DirTextApp(QMainWindow):
         self.depth_input.setStyleSheet(f"""
             QLineEdit {{
                 font-size: 9pt; padding: 2px 2px;
+                background: {c['surface']}; color: {c['fg']};
+                border: 1px solid {c['border']}; border-radius: 4px;
+            }}
+            QLineEdit:focus {{ border-color: {c['accent']}; }}
+        """)
+
+        self.search_input.setStyleSheet(f"""
+            QLineEdit {{
+                font-size: 10pt; padding: 5px 8px;
                 background: {c['surface']}; color: {c['fg']};
                 border: 1px solid {c['border']}; border-radius: 4px;
             }}
@@ -1853,10 +2259,12 @@ class DirTextApp(QMainWindow):
             self.metadata_options = dlg.options
 
     def _show_ignore_dialog(self):
-        dlg = IgnoreListDialog(self, patterns=self.ignore_patterns)
+        dlg = IgnoreListDialog(self, patterns=self.ignore_patterns, filter_criteria=self.filter_criteria)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.ignore_patterns = dlg.patterns
+            self.filter_criteria = dlg.filter_criteria
             self.cfg['ignore_patterns'] = self.ignore_patterns
+            self.cfg['filter_criteria'] = self.filter_criteria
             self._save_config()
             if self.folders:
                 self._scan()
@@ -1876,6 +2284,8 @@ class DirTextApp(QMainWindow):
             self._export_csv(timestamp)
         elif fmt_dlg.selected_format == 'json':
             self._export_json(timestamp)
+        elif fmt_dlg.selected_format == 'xlsx':
+            self._export_xlsx(timestamp)
         else:
             self._export_txt(timestamp)
 
@@ -1889,7 +2299,13 @@ class DirTextApp(QMainWindow):
             return
         try:
             el = self.export_lang
-            text = self._build_txt_content(el) if el != LANG else self._full_preview_text
+            entries = self._get_filtered_entries()
+            if entries != self.structured_data:
+                text = self._build_txt_from_entries(entries, el)
+            elif el != LANG:
+                text = self._build_txt_content(el)
+            else:
+                text = self._full_preview_text
             with open(fname, 'w', encoding='utf-8') as f:
                 f.write(text + f"\n\nGenerated: {datetime.now():%Y-%m-%d %H:%M:%S}")
             QMessageBox.information(self, 'Success', t('success', path=fname))
@@ -1949,6 +2365,46 @@ class DirTextApp(QMainWindow):
             else:
                 lines.append(f"{prefix}{connector}{entry.name}")
 
+    def _build_txt_from_entries(self, entries, lang):
+        """Build TXT content from a filtered list of entries, grouped by folder."""
+        sep = '═' * 80
+        lines = []
+        grouped = {}
+        for e in entries:
+            grouped.setdefault(e['folder'], []).append(e)
+
+        for i, folder in enumerate(self.folders):
+            if folder not in grouped:
+                continue
+            lines.append(sep)
+            if lang == 'en':
+                lines.append(f"Folder [{i + 1}]: {folder}")
+            else:
+                lines.append(f"文件夹 [{i + 1}]：{folder}")
+            lines.append(sep)
+
+            for entry in grouped[folder]:
+                try:
+                    rel = os.path.relpath(entry['path'], folder)
+                except ValueError:
+                    rel = entry['path']
+                if entry['type'] == 'dir':
+                    lines.append(f"  {rel}/")
+                else:
+                    lines.append(f"  {rel}")
+            lines.append('')
+
+        lines.append(sep)
+        total_dirs = sum(1 for e in entries if e['type'] == 'dir')
+        total_files = sum(1 for e in entries if e['type'] == 'file')
+        if lang == 'en':
+            lines.append(f"Total: {len(self.folders)} folder(s)")
+            lines.append(f"         {total_dirs} folders, {total_files} files")
+        else:
+            lines.append(f"总计：{len(self.folders)} 个文件夹")
+            lines.append(f"         共 {total_dirs} 个文件夹，{total_files} 个文件")
+        return '\n'.join(lines)
+
     @staticmethod
     def _open_export_folder(fname):
         folder = os.path.dirname(fname)
@@ -1968,7 +2424,8 @@ class DirTextApp(QMainWindow):
         )
         if not fname:
             return
-        total = len(self.structured_data)
+        export_data = self._get_filtered_entries()
+        total = len(export_data)
         self.progress_bar.setRange(0, total)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat(t('export_progress'))
@@ -1993,7 +2450,7 @@ class DirTextApp(QMainWindow):
                     headers.append(t('csv_col_accessed', lang=el))
                 writer.writerow(headers)
 
-                for i, entry in enumerate(self.structured_data):
+                for i, entry in enumerate(export_data):
                     row = [
                         entry['folder'], entry['name'], entry['path'],
                         t('csv_type_dir', lang=el) if entry['type'] == 'dir' else t('csv_type_file', lang=el),
@@ -2033,7 +2490,8 @@ class DirTextApp(QMainWindow):
         )
         if not fname:
             return
-        total = len(self.structured_data)
+        export_data = self._get_filtered_entries()
+        total = len(export_data)
         self.progress_bar.setRange(0, total)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat(t('export_progress'))
@@ -2043,7 +2501,7 @@ class DirTextApp(QMainWindow):
         try:
             meta = self.metadata_options
             data = []
-            for i, entry in enumerate(self.structured_data):
+            for i, entry in enumerate(export_data):
                 item = {
                     t('csv_col_folder', lang=el): entry['folder'],
                     t('csv_col_name', lang=el): entry['name'],
@@ -2072,12 +2530,164 @@ class DirTextApp(QMainWindow):
                 'export_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'folders': self.folders,
                 'total_folders': len(self.folders),
-                'total_dirs': sum(1 for e in self.structured_data if e['type'] == 'dir'),
-                'total_files': sum(1 for e in self.structured_data if e['type'] == 'file'),
+                'total_dirs': sum(1 for e in export_data if e['type'] == 'dir'),
+                'total_files': sum(1 for e in export_data if e['type'] == 'file'),
                 'entries': data,
             }
             with open(fname, 'w', encoding='utf-8') as f:
                 json.dump(export, f, ensure_ascii=False, indent=2)
+            QMessageBox.information(self, 'Success', t('success', path=fname))
+            self.status.showMessage(os.path.basename(fname))
+            self._open_export_folder(fname)
+        except Exception as e:
+            QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
+        finally:
+            self.progress_bar.hide()
+
+    def _export_xlsx(self, timestamp):
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
+            from openpyxl.utils import get_column_letter
+        except ImportError:
+            QMessageBox.critical(self, 'Error', t('xlsx_no_module'))
+            return
+
+        fname, _ = QFileDialog.getSaveFileName(
+            self, t('xlsx_save_title'),
+            t('xlsx_file_name', ts=timestamp),
+            'Excel files (*.xlsx);;All files (*.*)',
+        )
+        if not fname:
+            return
+
+        export_data = self._get_filtered_entries()
+        total = len(export_data)
+        self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat(t('export_progress'))
+        self.progress_bar.show()
+        self.status.showMessage(t('exporting'))
+        el = self.export_lang
+
+        try:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = 'File List'
+
+            # Styles
+            header_font = Font(name='Microsoft YaHei', bold=True, color='FFFFFF', size=10)
+            header_fill = PatternFill(start_color='007AFF', end_color='007AFF', fill_type='solid')
+            header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            cell_alignment = Alignment(vertical='center')
+            thin_border = Border(
+                left=Side(style='thin', color='D1D1D6'),
+                right=Side(style='thin', color='D1D1D6'),
+                top=Side(style='thin', color='D1D1D6'),
+                bottom=Side(style='thin', color='D1D1D6'),
+            )
+            header_border = Border(
+                left=Side(style='thin', color='0066CC'),
+                right=Side(style='thin', color='0066CC'),
+                top=Side(style='thin', color='0066CC'),
+                bottom=Side(style='thin', color='0066CC'),
+            )
+
+            # Headers
+            meta = self.metadata_options
+            headers = [
+                t('csv_col_folder', lang=el), t('csv_col_name', lang=el), t('csv_col_path', lang=el),
+                t('csv_col_type', lang=el), t('csv_col_level', lang=el),
+            ]
+            if meta.get('size'):
+                headers.append(t('csv_col_size', lang=el))
+            if meta.get('created'):
+                headers.append(t('csv_col_created', lang=el))
+            if meta.get('modified'):
+                headers.append(t('csv_col_modified', lang=el))
+            if meta.get('accessed'):
+                headers.append(t('csv_col_accessed', lang=el))
+
+            for col_idx, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col_idx, value=header)
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+                cell.border = header_border
+
+            # Determine column layout for date formatting
+            date_col_indices = {}
+            next_col = 6  # column 6 = first metadata column
+            if meta.get('size'):
+                next_col += 1
+            if meta.get('created'):
+                date_col_indices['created'] = next_col
+                next_col += 1
+            if meta.get('modified'):
+                date_col_indices['modified'] = next_col
+                next_col += 1
+            if meta.get('accessed'):
+                date_col_indices['accessed'] = next_col
+                next_col += 1
+
+            for i, entry in enumerate(export_data):
+                row = i + 2
+                row_data = [
+                    entry['folder'], entry['name'], entry['path'],
+                    t('csv_type_dir', lang=el) if entry['type'] == 'dir' else t('csv_type_file', lang=el),
+                    entry['level'],
+                ]
+                if meta.get('size'):
+                    if entry['type'] == 'file':
+                        row_data.append(f"{entry['size']} B")
+                    else:
+                        row_data.append('')
+                if meta.get('created'):
+                    ts = entry['created']
+                    row_data.append(datetime.fromtimestamp(ts) if ts else '')
+                if meta.get('modified'):
+                    ts = entry['modified']
+                    row_data.append(datetime.fromtimestamp(ts) if ts else '')
+                if meta.get('accessed'):
+                    ts = entry['accessed']
+                    row_data.append(datetime.fromtimestamp(ts) if ts else '')
+
+                for col_idx, value in enumerate(row_data, 1):
+                    cell = ws.cell(row=row, column=col_idx, value=value)
+                    cell.alignment = cell_alignment
+                    cell.border = thin_border
+                    cell.font = Font(name='Microsoft YaHei', size=10)
+                    if col_idx in date_col_indices.values() and isinstance(value, datetime):
+                        cell.number_format = 'YYYY-MM-DD HH:MM:SS'
+
+                if i % 50 == 0:
+                    self.progress_bar.setValue(i + 1)
+
+            # Auto-fit column widths
+            for col_cells in ws.columns:
+                max_length = 0
+                col_letter = get_column_letter(col_cells[0].column)
+                for cell in col_cells:
+                    if cell.value:
+                        max_length = max(max_length, len(str(cell.value)))
+                ws.column_dimensions[col_letter].width = min(max_length + 3, 65)
+
+            # Freeze first row
+            ws.freeze_panes = 'A2'
+
+            # Auto filter
+            ws.auto_filter.ref = ws.dimensions
+
+            # Zebra striping for data rows
+            zebra_fill = PatternFill(start_color='F5F5F7', end_color='F5F5F7', fill_type='solid')
+            for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+                if row[0].row % 2 == 0:
+                    for cell in row:
+                        cell.fill = zebra_fill
+
+            self.progress_bar.setValue(total)
+            wb.save(fname)
+
             QMessageBox.information(self, 'Success', t('success', path=fname))
             self.status.showMessage(os.path.basename(fname))
             self._open_export_folder(fname)
