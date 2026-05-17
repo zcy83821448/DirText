@@ -1,4 +1,4 @@
-# DirText v3.8
+# DirText v3.9
 
 [![Release](https://img.shields.io/github/v/release/zcy83821448/DirText)](https://github.com/zcy83821448/DirText/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)](https://github.com/zcy83821448/DirText)
@@ -6,7 +6,7 @@
 
 > **English** | [中文说明](#中文说明)
 
-A lightweight Windows GUI tool that scans folder structures and exports them as **TXT tree text**, **CSV table**, or **JSON structured data**.
+A lightweight Windows GUI tool that scans folder structures and exports them as **TXT tree text**, **CSV table**, **XLSX spreadsheet**, or **JSON structured data**.
 
 Built with PyQt6. Auto-detects system language (English / Chinese). No installation required.
 
@@ -20,15 +20,17 @@ Built with PyQt6. Auto-detects system language (English / Chinese). No installat
 | 🖱️ **Drag & Drop** | Drag any folder directly into the window — auto-scans on drop |
 | 📋 **Clipboard Auto-detect** | Automatically recognizes valid folder paths copied to clipboard on startup |
 | 🔍 **Recursion Depth Control** | Free text input for recursion depth. `0` = current level only, `-1` = all levels. 1-second debounce auto-scan |
-| 💾 **Export Format Selection** | Choose between **TXT** (tree text), **CSV** (table), **JSON** (structured data) before saving |
-| 📊 **Metadata Export** | Optional metadata for CSV/JSON: file size, creation date, modification date, last access date |
+| 💾 **Export Format Selection** | Choose between **TXT** (tree text), **CSV** (table), **XLSX** (spreadsheet), **JSON** (structured data) before saving |
+| 📊 **Metadata Export** | Optional metadata for CSV/JSON/XLSX: file size, creation date, modification date, last access date |
 | 🌐 **Export Language Toggle** | Switch export content language (EN / 中文) independently from the UI language |
-| 📈 **Export Progress Bar** | Real-time progress bar for CSV/JSON exports with status updates |
+| 📈 **Export Progress Bar** | Real-time progress bar for exports with status updates |
 | 🌐 **Auto Bilingual UI** | Interface automatically switches between English and Chinese based on system locale |
 | ⚡ **Real-time Preview** | Live preview of directory tree while scanning |
+| 🔎 **Search** | Search for files directly in the preview window |
 | 🌙 **Dark Mode** | One-click toggle between dark and light themes |
-| 📋 **Click to Copy Path** | Click any file or folder in the preview window to copy its full path to clipboard |
+| 📋 **Right-click to Copy Path** | Right-click any file or folder in the preview to copy its full path to clipboard |
 | 🚫 **Custom Ignore Patterns** | Ignore specific file extensions; users can customize their own ignore list |
+| 🔽 **Filter** | Filter files by specific date or size ranges |
 | 🚀 **Multi-threaded Scanning** | Parallel directory scanning with ThreadPoolExecutor for faster performance |
 | 🎯 **Performance Optimized** | Preview line limit, reduced animation frame rate, and overall performance improvements |
 
@@ -53,13 +55,15 @@ Built with PyQt6. Auto-detects system language (English / Chinese). No installat
    - Copy a folder path to clipboard before launch — it will auto-detect
 3. **Set recursion depth** in the text field (default `0` = current level)
 4. **Preview** the generated tree in real-time
-5. Click **"Export"** → choose **TXT / CSV / JSON** → save with auto-generated timestamp
-6. *(CSV/JSON only)* Click **"Metadata"** to optionally include file size, creation, modification and access dates
-7. *(Optional)* Use the top-left **EN / 中文** toggle to change the export file language without affecting the UI
-8. *(Optional)* Click the **theme toggle** to switch between light and dark mode
-9. *(Optional)* Click **"Ignore"** to set custom file extensions to exclude from scanning
+5. Use the **Search** box above the preview to find specific files
+6. Use **Filter** to narrow down results by date or size
+7. Click **"Export"** → choose **TXT / CSV / XLSX / JSON** → save with auto-generated timestamp
+8. *(CSV/JSON/XLSX only)* Click **"Metadata"** to optionally include file size, creation, modification and access dates
+9. *(Optional)* Use the top-left **EN / 中文** toggle to change the export file language without affecting the UI
+10. *(Optional)* Click the **theme toggle** to switch between light and dark mode
+11. *(Optional)* Click **"Ignore"** to set custom file extensions to exclude from scanning
 
-> 💡 **Tip:** If date columns show as `####` when opening CSV in Excel, simply widen the column width.
+> 💡 **Tip:** If date columns show as `####` when opening CSV/XLSX in Excel, simply widen the column width.
 
 ---
 
@@ -95,6 +99,12 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 📝 Changelog
 
+### v3.9
+- **Search** — Added a search box above the preview window to quickly find files
+- **Right-click to Copy Path** — Moved copy-path action from left-click to right-click context menu in the preview
+- **XLSX Export** — New export format: Excel spreadsheet (.xlsx)
+- **Filter** — Filter files by specific date or size ranges
+
 ### v3.8
 - **Multi-threaded Scanning** — Parallel directory scanning with ThreadPoolExecutor for significantly faster performance on large directories
 - **Preview Line Limit** — Preview window now limits to 5000 lines for smooth performance; full content available on export
@@ -127,7 +137,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 🏷️ Keywords / Tags
 
-`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `json-export` `metadata-export` `file-metadata` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop` `dark-mode` `ignore-patterns` `multi-threaded`
+`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `xlsx-export` `json-export` `metadata-export` `file-metadata` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop` `dark-mode` `ignore-patterns` `multi-threaded` `search` `filter`
 
 ---
 
@@ -141,9 +151,9 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 <a name="中文说明"></a>
 
-# DirText v3.8 中文说明
+# DirText v3.9 中文说明
 
-轻量级 Windows GUI 工具，扫描文件夹结构并导出为 **TXT 树形文本**、**CSV 表格** 或 **JSON 结构化数据**。
+轻量级 Windows GUI 工具，扫描文件夹结构并导出为 **TXT 树形文本**、**CSV 表格**、**XLSX 电子表格** 或 **JSON 结构化数据**。
 
 基于 PyQt6 构建，自动识别系统语言（英文/中文），无需安装，即开即用。
 
@@ -157,15 +167,17 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 | 🖱️ **拖拽支持** | 直接将文件夹拖入窗口任意区域，松开后自动添加并扫描 |
 | 📋 **剪贴板自动识别** | 启动时自动检测剪贴板中的有效文件夹路径 |
 | 🔍 **递归深度自由输入** | 文本框输入递归层数，`0` = 仅当前层，`-1` = 全部层级，输入停止后 1 秒自动触发扫描 |
-| 💾 **导出格式选择** | 导出前可选择 **TXT**（树形文本）、**CSV**（表格）、**JSON**（结构化数据） |
-| 📊 **元数据导出** | CSV/JSON 可选导出文件大小、创建日期、修改日期、访问日期 |
+| 💾 **导出格式选择** | 导出前可选择 **TXT**（树形文本）、**CSV**（表格）、**XLSX**（电子表格）、**JSON**（结构化数据） |
+| 📊 **元数据导出** | CSV/JSON/XLSX 可选导出文件大小、创建日期、修改日期、访问日期 |
 | 🌐 **导出语言切换** | 左上角切换导出文件语言（EN / 中文），不影响程序界面语言 |
-| 📈 **导出进度条** | CSV/JSON 导出时底部显示精确进度条与状态提示 |
+| 📈 **导出进度条** | 导出时底部显示精确进度条与状态提示 |
 | 🌐 **自动双语界面** | 根据系统区域设置自动切换英文/中文界面 |
 | ⚡ **实时预览** | 扫描过程中实时预览目录树结构 |
+| 🔎 **搜索** | 预览窗口上方搜索框，可直接搜索对应文件 |
 | 🌙 **深色模式** | 一键切换深色/浅色主题 |
-| 📋 **点击复制路径** | 预览窗口中点击任意文件或文件夹，即可复制其完整路径到剪贴板 |
+| 📋 **右键复制路径** | 预览窗口中右键点击任意文件或文件夹，即可复制其完整路径到剪贴板 |
 | 🚫 **自定义忽略规则** | 支持按文件后缀名忽略特定文件，用户可自定义忽略列表 |
+| 🔽 **筛选** | 可按特定日期或大小范围筛选文件 |
 | 🚀 **多线程扫描** | 使用 ThreadPoolExecutor 并行扫描目录，大幅提升大目录扫描速度 |
 | 🎯 **性能优化** | 预览行数限制、降低主题切换帧率、整体性能提升与代码重构 |
 
@@ -190,13 +202,15 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
    - 启动前复制文件夹路径到剪贴板 — 程序会自动识别
 3. 在递归深度输入框中设置层数（默认 `0` = 仅当前层）
 4. **实时预览** 生成的目录树
-5. 点击 **"导出文本"** → 选择 **TXT / CSV / JSON** → 自动带时间戳保存
-6. *（CSV/JSON 专属）* 点击 **"元数据"** 按钮，可选择附带文件大小、创建/修改/访问日期
-7. *（可选）* 点击左上角 **EN / 中文** 切换导出文件语言，不影响程序界面
-8. *（可选）* 点击 **主题切换按钮** 在深色/浅色模式间切换
-9. *（可选）* 点击 **"忽略"** 按钮，设置需要排除扫描的特定文件后缀名
+5. 使用预览区上方的 **搜索框** 快速查找文件
+6. 使用 **筛选** 功能按日期或大小范围过滤结果
+7. 点击 **"导出文本"** → 选择 **TXT / CSV / XLSX / JSON** → 自动带时间戳保存
+8. *（CSV/JSON/XLSX 专属）* 点击 **"元数据"** 按钮，可选择附带文件大小、创建/修改/访问日期
+9. *（可选）* 点击左上角 **EN / 中文** 切换导出文件语言，不影响程序界面
+10. *（可选）* 点击 **主题切换按钮** 在深色/浅色模式间切换
+11. *（可选）* 点击 **"忽略"** 按钮，设置需要排除扫描的特定文件后缀名
 
-> 💡 **提示：** 若 CSV 用 Excel 打开后日期列显示 `####`，拖宽列宽即可正常显示。
+> 💡 **提示：** 若 CSV / XLSX 用 Excel 打开后日期列显示 `####`，拖宽列宽即可正常显示。
 
 ---
 
@@ -231,6 +245,12 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 📝 更新日志
 
+### v3.9
+- **搜索** — 预览窗口上方新增搜索框，可直接搜索对应文件
+- **右键复制路径** — 左键点击复制路径功能废除，迁移至右键菜单
+- **XLSX 导出** — 新增 Excel 电子表格 (.xlsx) 导出格式
+- **筛选** — 可按特定日期或大小范围筛选文件
+
 ### v3.8
 - **多线程扫描** — 使用 ThreadPoolExecutor 并行扫描目录，大幅提升大目录扫描速度
 - **预览行数限制** — 预览窗口限制为 5000 行以保证流畅性能，导出可查看完整内容
@@ -263,7 +283,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 🏷️ 关键词 / 标签
 
-`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `JSON导出` `元数据导出` `文件元数据` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持` `深色模式` `忽略规则` `多线程`
+`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `XLSX导出` `JSON导出` `元数据导出` `文件元数据` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持` `深色模式` `忽略规则` `多线程` `搜索` `筛选`
 
 ---
 
