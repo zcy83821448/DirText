@@ -6,6 +6,7 @@ Automatically switches UI language based on system locale.
 根据系统区域自动切换界面语言。
 """
 
+import ctypes
 import csv
 import fnmatch
 import json
@@ -14,18 +15,23 @@ import os
 import platform
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QLabel, QPushButton,
+    QApplication, QFrame, QMainWindow, QWidget, QLabel, QPushButton,
     QPlainTextEdit, QVBoxLayout, QHBoxLayout, QMessageBox,
     QFileDialog, QDialog, QTreeView, QAbstractItemView,
     QComboBox, QProgressBar, QHeaderView, QGraphicsOpacityEffect,
-    QLineEdit, QCheckBox, QToolTip, QListWidget
+    QLineEdit, QCheckBox, QListWidget
 )
 from PyQt6.QtCore import Qt, QTimer, QSortFilterProxyModel, QDir, QPropertyAnimation, QEasingCurve, pyqtSignal, QThread
-from PyQt6.QtGui import QFileSystemModel, QFont
+from PyQt6.QtGui import QColor, QFileSystemModel, QFont, QPalette
+
+# ---------- 预览行数限制 / Preview Line Limit ----------
+PREVIEW_LINE_LIMIT = 5000
 
 # ---------- 语言检测 / Language Detection ----------
 def get_system_language():
@@ -358,12 +364,10 @@ class FolderSelectDialog(QDialog):
     def _navigate_to(self, path):
         """导航到指定目录"""
         path = os.path.normpath(path)
+        self.tree.collapseAll()
         root_idx = self.model.setRootPath(path)
-        # 保证代理模型和树视图同步
         self.tree.setRootIndex(self.proxy.mapFromSource(root_idx))
-        # 展开第一级方便浏览
-        self.tree.expandAll()
-        # 更新路径提示
+        self.tree.expand(self.tree.rootIndex())
         self.path_label.setText(f"{t('current_path')} {path}")
 
     def _switch_drive(self, index):
@@ -383,10 +387,10 @@ class FolderSelectDialog(QDialog):
         for idx in indexes:
             src_idx = self.proxy.mapToSource(idx)
             paths.append(self.model.filePath(src_idx))
-        # 去重
         self.selected_folders = list(dict.fromkeys(paths))
-        if self.selected_folders:
-            self.accept()
+        if not self.selected_folders:
+            self.selected_folders = [self.model.rootPath()]
+        self.accept()
 
 
 # ---------- 统一动画管理器 / Unified Transition Manager ----------
@@ -447,36 +451,44 @@ class TransitionManager:
 class AnimatedButton(QPushButton):
     """带悬停高亮和按压反馈动画的按钮"""
 
+    _shared_tm = TransitionManager()
+
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
-        self._tm = TransitionManager()
         self._effect = QGraphicsOpacityEffect(self)
         self._effect.setOpacity(0.92)
         self.setGraphicsEffect(self._effect)
+        self.destroyed.connect(self._cleanup_effect)
+
+    def _cleanup_effect(self):
+        if self._effect:
+            AnimatedButton._shared_tm.stop_target(self._effect)
+            self._effect.deleteLater()
+            self._effect = None
 
     def enterEvent(self, event):
-        self._tm.stop_target(self._effect)
-        self._tm.animate(
+        AnimatedButton._shared_tm.stop_target(self._effect)
+        AnimatedButton._shared_tm.animate(
             self._effect, b"opacity", 0.92, 1.0, 180,
             QEasingCurve.Type.OutCubic,
         )
         super().enterEvent(event)
 
     def leaveEvent(self, event):
-        self._tm.stop_target(self._effect)
-        self._tm.animate(
+        AnimatedButton._shared_tm.stop_target(self._effect)
+        AnimatedButton._shared_tm.animate(
             self._effect, b"opacity", 1.0, 0.92, 180,
             QEasingCurve.Type.OutCubic,
         )
         super().leaveEvent(event)
 
     def mousePressEvent(self, event):
-        self._tm.stop_target(self._effect)
+        AnimatedButton._shared_tm.stop_target(self._effect)
         self._effect.setOpacity(0.72)
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
-        self._tm.animate(
+        AnimatedButton._shared_tm.animate(
             self._effect, b"opacity", 0.72, 1.0, 220,
             QEasingCurve.Type.OutCubic,
         )
@@ -494,11 +506,11 @@ class ScanWorker(QThread):
         self.folders = folders
         self.recursion_depth = recursion_depth
         self.ignore_patterns = ignore_patterns or []
-        self._abort = False
+        self._abort_event = threading.Event()
         self.structured_data = []
 
     def abort(self):
-        self._abort = True
+        self._abort_event.set()
 
     def run(self):
         lines = []
@@ -506,32 +518,36 @@ class ScanWorker(QThread):
         total_dirs = 0
         total_files = 0
         sep = '═' * 80
+        item_count = 0
 
-        self._item_index = 0
-        self._last_emit_time = 0
-        self._emit_interval = 0.1  # 100ms throttle
-
-        for i, folder in enumerate(self.folders):
-            if self._abort:
-                lines.append(f"⚠ {t('cancelling')}")
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            for i, folder in enumerate(self.folders):
+                if self._abort_event.is_set():
+                    lines.append(f"⚠ {t('cancelling')}")
+                    line_paths.append(None)
+                    break
+                self.folder_progress.emit(folder)
+                lines.append(sep)
                 line_paths.append(None)
-                break
-            self.folder_progress.emit(folder)
-            lines.append(sep)
-            line_paths.append(None)
-            if LANG == 'en':
-                lines.append(f"Folder [{i + 1}]: {folder}")
-            else:
-                lines.append(f"文件夹 [{i + 1}]：{folder}")
-            line_paths.append(None)
-            lines.append(sep)
-            line_paths.append(None)
-            entry_lines, d, f = self._walk_dir(folder, self.recursion_depth, root=folder, line_paths=line_paths)
-            lines.extend(entry_lines)
-            total_dirs += d
-            total_files += f
-            lines.append("")
-            line_paths.append(None)
+                if LANG == 'en':
+                    lines.append(f"Folder [{i + 1}]: {folder}")
+                else:
+                    lines.append(f"文件夹 [{i + 1}]：{folder}")
+                line_paths.append(None)
+                lines.append(sep)
+                line_paths.append(None)
+
+                entry_lines, entry_paths, d, f, added = self._process_folder(
+                    folder, executor)
+                lines.extend(entry_lines)
+                line_paths.extend(entry_paths)
+                total_dirs += d
+                total_files += f
+                item_count += added
+                self.progress.emit(item_count)
+
+                lines.append("")
+                line_paths.append(None)
 
         lines.append(sep)
         line_paths.append(None)
@@ -547,19 +563,13 @@ class ScanWorker(QThread):
         self._line_paths = line_paths
         self.finished.emit(lines, total_dirs, total_files)
 
-    def _should_emit_progress(self):
-        now = time.perf_counter()
-        if now - self._last_emit_time >= self._emit_interval:
-            self.progress.emit(self._item_index)
-            self._last_emit_time = now
-
-    def _walk_dir(self, folder, max_depth, current_depth=0, prefix="", root=None, line_paths=None):
+    def _process_folder(self, folder, executor):
+        """Process a single top-level folder, parallelizing subdirectory scans."""
         lines = []
+        line_paths = []
         dir_count = 0
         file_count = 0
-
-        if self._abort:
-            return lines, dir_count, file_count
+        item_count = 0
 
         try:
             entries = sorted(os.scandir(folder), key=lambda e: e.name)
@@ -568,24 +578,129 @@ class ScanWorker(QThread):
                            if not any(fnmatch.fnmatch(e.name, p)
                                       for p in self.ignore_patterns)]
         except PermissionError:
-            if LANG == 'en':
-                lines.append(f"{prefix}└── <Access denied>")
+            msg = '<Access denied>' if LANG == 'en' else '<无法访问>'
+            lines.append(f"└── {msg}")
+            line_paths.append(None)
+            return lines, line_paths, 0, 0, 1
+        except Exception as e:
+            lines.append(f"└── <Error: {e}>")
+            line_paths.append(None)
+            return lines, line_paths, 0, 0, 1
+
+        entry_infos = []
+        future_to_idx = {}
+
+        for idx, entry in enumerate(entries):
+            is_last = (idx == len(entries) - 1)
+            connector = "└── " if is_last else "├── "
+            child_prefix = "    " if is_last else "│   "
+
+            info = {
+                'name': entry.name,
+                'path': entry.path,
+                'is_dir': entry.is_dir(),
+                'connector': connector,
+                'child_prefix': child_prefix,
+            }
+
+            if entry.is_dir():
+                st = self._safe_stat(entry)
+                info['stat'] = st
+                if self.recursion_depth == -1 or 0 < self.recursion_depth:
+                    future = executor.submit(
+                        self._scan_tree,
+                        entry.path, self.recursion_depth, 1,
+                        child_prefix, folder,
+                        self.ignore_patterns, self._abort_event,
+                    )
+                    future_to_idx[future] = idx
             else:
-                lines.append(f"{prefix}└── <无法访问>")
-            if line_paths is not None:
-                line_paths.append(None)
-            return lines, 0, 0
+                st = self._safe_stat(entry)
+                info['stat'] = st
+
+            entry_infos.append(info)
+
+        sub_results = {}
+        for future in as_completed(future_to_idx):
+            if self._abort_event.is_set():
+                break
+            idx = future_to_idx[future]
+            try:
+                sub_results[idx] = future.result()
+            except Exception:
+                sub_results[idx] = ([], [], [], 0, 0)
+
+        for idx, info in enumerate(entry_infos):
+            if self._abort_event.is_set():
+                break
+
+            if info['is_dir']:
+                lines.append(f"{info['connector']}{info['name']}/")
+                line_paths.append(info['path'])
+                dir_count += 1
+                item_count += 1
+                st = info['stat']
+                self.structured_data.append({
+                    'folder': folder, 'name': info['name'], 'path': info['path'],
+                    'type': 'dir', 'level': 0,
+                    'size': st['size'], 'created': st['created'],
+                    'modified': st['modified'], 'accessed': st['accessed'],
+                })
+                if idx in sub_results:
+                    sub_lines, sub_paths, sub_data, sub_dirs, sub_files = sub_results[idx]
+                    lines.extend(sub_lines)
+                    line_paths.extend(sub_paths)
+                    self.structured_data.extend(sub_data)
+                    dir_count += sub_dirs
+                    file_count += sub_files
+                    item_count += sub_dirs + sub_files
+            else:
+                lines.append(f"{info['connector']}{info['name']}")
+                line_paths.append(info['path'])
+                file_count += 1
+                item_count += 1
+                st = info['stat']
+                self.structured_data.append({
+                    'folder': folder, 'name': info['name'], 'path': info['path'],
+                    'type': 'file', 'level': 0,
+                    'size': st['size'], 'created': st['created'],
+                    'modified': st['modified'], 'accessed': st['accessed'],
+                })
+
+        return lines, line_paths, dir_count, file_count, item_count
+
+    @staticmethod
+    def _scan_tree(folder, max_depth, current_depth, prefix, root,
+                   ignore_patterns, abort_event):
+        """Recursively scan a directory tree. Runs in any thread."""
+        if abort_event.is_set():
+            return [], [], [], 0, 0
+
+        lines = []
+        line_paths = []
+        structured_data = []
+        dir_count = 0
+        file_count = 0
+
+        try:
+            entries = sorted(os.scandir(folder), key=lambda e: e.name)
+            if ignore_patterns:
+                entries = [e for e in entries
+                           if not any(fnmatch.fnmatch(e.name, p)
+                                      for p in ignore_patterns)]
+        except PermissionError:
+            msg = '<Access denied>' if LANG == 'en' else '<无法访问>'
+            lines.append(f"{prefix}└── {msg}")
+            line_paths.append(None)
+            return lines, line_paths, [], 0, 0
         except Exception as e:
             lines.append(f"{prefix}└── <Error: {e}>")
-            if line_paths is not None:
-                line_paths.append(None)
-            return lines, 0, 0
+            line_paths.append(None)
+            return lines, line_paths, [], 0, 0
 
         for i, entry in enumerate(entries):
-            if self._abort:
+            if abort_event.is_set():
                 break
-            self._item_index += 1
-            self._should_emit_progress()
 
             is_last = (i == len(entries) - 1)
             connector = "└── " if is_last else "├── "
@@ -593,38 +708,39 @@ class ScanWorker(QThread):
 
             if entry.is_dir():
                 lines.append(f"{prefix}{connector}{entry.name}/")
-                if line_paths is not None:
-                    line_paths.append(entry.path)
+                line_paths.append(entry.path)
                 dir_count += 1
-                if root is not None:
-                    st = self._safe_stat(entry)
-                    self.structured_data.append({
-                        'folder': root, 'name': entry.name, 'path': entry.path,
-                        'type': 'dir', 'level': current_depth,
-                        'size': st['size'], 'created': st['created'],
-                        'modified': st['modified'], 'accessed': st['accessed'],
-                    })
+                st = ScanWorker._safe_stat(entry)
+                structured_data.append({
+                    'folder': root, 'name': entry.name, 'path': entry.path,
+                    'type': 'dir', 'level': current_depth,
+                    'size': st['size'], 'created': st['created'],
+                    'modified': st['modified'], 'accessed': st['accessed'],
+                })
                 if max_depth == -1 or current_depth < max_depth:
-                    sub_lines, sub_dirs, sub_files = self._walk_dir(
-                        entry.path, max_depth, current_depth + 1, prefix + child_prefix, root, line_paths)
+                    sub_lines, sub_paths, sub_data, sub_dirs, sub_files = ScanWorker._scan_tree(
+                        entry.path, max_depth, current_depth + 1,
+                        prefix + child_prefix, root,
+                        ignore_patterns, abort_event,
+                    )
                     lines.extend(sub_lines)
+                    line_paths.extend(sub_paths)
+                    structured_data.extend(sub_data)
                     dir_count += sub_dirs
                     file_count += sub_files
             else:
                 lines.append(f"{prefix}{connector}{entry.name}")
-                if line_paths is not None:
-                    line_paths.append(entry.path)
+                line_paths.append(entry.path)
                 file_count += 1
-                if root is not None:
-                    st = self._safe_stat(entry)
-                    self.structured_data.append({
-                        'folder': root, 'name': entry.name, 'path': entry.path,
-                        'type': 'file', 'level': current_depth,
-                        'size': st['size'], 'created': st['created'],
-                        'modified': st['modified'], 'accessed': st['accessed'],
-                    })
+                st = ScanWorker._safe_stat(entry)
+                structured_data.append({
+                    'folder': root, 'name': entry.name, 'path': entry.path,
+                    'type': 'file', 'level': current_depth,
+                    'size': st['size'], 'created': st['created'],
+                    'modified': st['modified'], 'accessed': st['accessed'],
+                })
 
-        return lines, dir_count, file_count
+        return lines, line_paths, structured_data, dir_count, file_count
 
     @staticmethod
     def _safe_stat(entry):
@@ -932,16 +1048,29 @@ class DirTextApp(QMainWindow):
         self._worker = None
         self._scanning = False
         self.structured_data = []
+        self._full_preview_text = ""
         self._line_paths = []
+        self._scan_total_dirs = 0
+        self._scan_total_files = 0
         self.metadata_options = {
             'size': False, 'created': False, 'modified': False, 'accessed': False,
         }
         self.ignore_patterns = list(self.cfg.get('ignore_patterns', []))
         self.export_lang = LANG
+        self._copy_tip = None
         self._depth_timer = QTimer(self)
         self._depth_timer.setSingleShot(True)
         self._depth_timer.setInterval(1000)
         self._depth_timer.timeout.connect(self._apply_depth)
+        self._progress_timer = QTimer(self)
+        self._progress_timer.setSingleShot(True)
+        self._progress_timer.setInterval(100)
+        self._progress_timer.timeout.connect(self._flush_progress)
+        self._pending_progress = 0
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(500)
+        self._save_timer.timeout.connect(self._save_config)
         self._setup_ui()
 
     # ----- 配置读写 / Config read/write -----
@@ -965,13 +1094,23 @@ class DirTextApp(QMainWindow):
         self.cfg['h'] = self.height()
         self.cfg['x'] = self.x()
         self.cfg['y'] = self.y()
-        self._save_config()
+        self._save_timer.start()
 
     # ----- 窗口事件 / Window Events -----
     def closeEvent(self, event):
         self._transition.stop_all()
+        if hasattr(self, '_theme_timer') and self._theme_timer:
+            try:
+                self._theme_timer.stop()
+                self._theme_timer.timeout.disconnect()
+                self._theme_timer.deleteLater()
+            except:
+                pass
         self.setWindowOpacity(1.0)
+        self._save_timer.stop()
+        self._progress_timer.stop()
         self._remember_geometry()
+        self._save_config()
         if self._worker is not None and self._worker.isRunning():
             self._worker.abort()
             self._worker.wait(3000)
@@ -1043,6 +1182,7 @@ class DirTextApp(QMainWindow):
         self._setup_progress_bar(layout)
         self._setup_button_bar(layout)
         self._show_welcome()
+        self._apply_menu_style()
 
     def _setup_window(self):
         self.setWindowTitle(t('title'))
@@ -1054,14 +1194,19 @@ class DirTextApp(QMainWindow):
         self.resize(w, h)
 
         central = QWidget()
-        central.setStyleSheet(f"background: {C['bg']};")
+        central.setObjectName("centralWidget")
+        central.setStyleSheet(f"#centralWidget {{ background: {C['bg']}; }}")
         self.setCentralWidget(central)
 
     def _setup_header(self, layout):
         header_row = QHBoxLayout()
         header_row.setSpacing(0)
 
-        self.btn_export_lang = QPushButton('EN' if self.export_lang == 'zh' else '中文')
+        self.lbl_export_lang = QLabel(t('export_lang_label'))
+        self.lbl_export_lang.setStyleSheet(f"color: {C['fg2']}; font-size: 8pt; background: transparent;")
+        header_row.addWidget(self.lbl_export_lang)
+
+        self.btn_export_lang = QPushButton('EN' if self.export_lang == 'en' else '中文')
         self.btn_export_lang.setFixedSize(46, 22)
         self.btn_export_lang.setStyleSheet(f"""
             QPushButton {{
@@ -1073,10 +1218,6 @@ class DirTextApp(QMainWindow):
         """)
         self.btn_export_lang.clicked.connect(self._toggle_export_lang)
         header_row.addWidget(self.btn_export_lang)
-
-        self.lbl_export_lang = QLabel(t('export_lang_label'))
-        self.lbl_export_lang.setStyleSheet(f"color: {C['fg2']}; font-size: 8pt; background: transparent;")
-        header_row.addWidget(self.lbl_export_lang)
         header_row.addStretch()
 
         self._title_label = QLabel(t('header'))
@@ -1106,39 +1247,25 @@ class DirTextApp(QMainWindow):
         layout.addWidget(self._subtitle_label)
 
     def _setup_preview(self, layout):
+        self.preview_frame = QWidget()
+        self.preview_frame.setObjectName("previewFrame")
+        self.preview_frame.setStyleSheet(f"""
+            #previewFrame {{
+                border: 1px solid {C['border']}; border-radius: 4px;
+                background: {C['surface']};
+            }}
+        """)
+        frame_layout = QVBoxLayout(self.preview_frame)
+        frame_layout.setContentsMargins(0, 0, 0, 0)
+
         self.preview = ClickablePreview()
         self.preview.setReadOnly(True)
         self.preview.lineClicked.connect(self._on_preview_line_clicked)
-        self.preview.setStyleSheet(f"""
-            QPlainTextEdit {{
-                font-family: Consolas, 'Microsoft YaHei'; font-size: 11pt;
-                background: {C['surface']}; color: {C['fg']};
-                border: 1px solid {C['border']}; border-radius: 4px;
-                padding: 10px;
-            }}
-            QScrollBar:vertical {{
-                width: 7px;
-                background: transparent;
-                margin: 2px 2px 2px 0;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {C['scroll_handle']};
-                border-radius: 3px;
-                min-height: 28px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background: {C['scroll_handle_hover']};
-            }}
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {{
-                background: none;
-            }}
-        """)
-        layout.addWidget(self.preview, stretch=1)
+        self.preview.document().setDocumentMargin(10)
+        self._apply_preview_colors(C)
+        self._apply_preview_scrollbar(C)
+        frame_layout.addWidget(self.preview)
+        layout.addWidget(self.preview_frame, stretch=1)
 
         self._preview_effect = QGraphicsOpacityEffect(self.preview)
         self._preview_effect.setOpacity(1.0)
@@ -1239,8 +1366,16 @@ class DirTextApp(QMainWindow):
 
     # ----- 预览文本过渡 / Preview Text Transition -----
     def _set_preview_text(self, text):
-        """预览文本淡入淡出：淡出 → 换文本 → 淡入"""
+        """预览文本淡入淡出：淡出 → 换文本 → 淡入。超过 PREVIEW_LINE_LIMIT 行则截断预览。"""
         self._transition.stop_target(self._preview_effect)
+        self._full_preview_text = text
+        lines = text.split('\n')
+        if len(lines) > PREVIEW_LINE_LIMIT:
+            if LANG == 'en':
+                notice = f"\n\n... Showing first {PREVIEW_LINE_LIMIT} of {len(lines)} lines — export to view full content."
+            else:
+                notice = f"\n\n... 仅显示前 {PREVIEW_LINE_LIMIT} 行（共 {len(lines)} 行）— 导出可查看完整内容。"
+            text = '\n'.join(lines[:PREVIEW_LINE_LIMIT]) + notice
         self._pending_text = text
         self._transition.animate(
             self._preview_effect, b"opacity", 1.0, 0.1, 100,
@@ -1267,12 +1402,80 @@ class DirTextApp(QMainWindow):
                 block = self.preview.document().findBlockByLineNumber(line)
                 cursor.setPosition(block.position())
                 rect = self.preview.cursorRect(cursor)
-                QToolTip.showText(
-                    self.preview.mapToGlobal(rect.topLeft()),
-                    t('path_copied', path=path),
-                    self.preview,
-                    rect,
-                )
+                pos = self.preview.mapToGlobal(rect.topLeft())
+                self._show_copy_tip(pos, t('path_copied', path=path))
+
+    def _show_copy_tip(self, pos, text):
+        if hasattr(self, '_copy_tip') and self._copy_tip:
+            try:
+                self._transition.stop_target(self._copy_tip_effect)
+                self._copy_tip.hide()
+                self._copy_tip.deleteLater()
+            except RuntimeError:
+                pass
+        if hasattr(self, '_copy_tip_timer') and self._copy_tip_timer:
+            self._copy_tip_timer.stop()
+
+        tip = QLabel(text, self)
+        tip.setWindowFlags(
+            Qt.WindowType.ToolTip |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowDoesNotAcceptFocus |
+            Qt.WindowType.WindowTransparentForInput
+        )
+        tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        tip.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        tip.setStyleSheet(f"""
+            QLabel {{
+                background: {C['surface']}; color: {C['fg']};
+                border: 1px solid {C['border']};
+                padding: 5px 10px; border-radius: 5px;
+                font-size: 10pt;
+            }}
+        """)
+        tip.adjustSize()
+        tip.move(pos)
+
+        effect = QGraphicsOpacityEffect(tip)
+        effect.setOpacity(0.0)
+        tip.setGraphicsEffect(effect)
+        tip.show()
+
+        self._copy_tip = tip
+        self._copy_tip_effect = effect
+
+        # fade in: fast start (transparent), slow end (opaque) → OutCubic
+        self._transition.animate(
+            effect, b"opacity", 0.0, 1.0, 350,
+            QEasingCurve.Type.OutCubic,
+            on_finished=self._on_copy_tip_fade_in_done,
+        )
+
+    def _on_copy_tip_fade_in_done(self):
+        # stay at full opacity, then fade out
+        self._copy_tip_timer = QTimer(self)
+        self._copy_tip_timer.setSingleShot(True)
+        self._copy_tip_timer.timeout.connect(self._fade_out_copy_tip)
+        self._copy_tip_timer.start(1300)
+
+    def _fade_out_copy_tip(self):
+        if not hasattr(self, '_copy_tip_effect') or not self._copy_tip_effect:
+            return
+        # fade out: slow start (opaque), fast end (transparent) → InCubic
+        self._transition.animate(
+            self._copy_tip_effect, b"opacity", 1.0, 0.0, 350,
+            QEasingCurve.Type.InCubic,
+            on_finished=self._hide_copy_tip,
+        )
+
+    def _hide_copy_tip(self):
+        if hasattr(self, '_copy_tip') and self._copy_tip:
+            try:
+                self._copy_tip.hide()
+                self._copy_tip.deleteLater()
+            except RuntimeError:
+                pass
+            self._copy_tip = None
 
     # ----- 核心功能 / Core Functions -----
     def add_folder(self):
@@ -1341,6 +1544,7 @@ class DirTextApp(QMainWindow):
         self.folders.clear()
         self.structured_data.clear()
         self._line_paths.clear()
+        self._full_preview_text = ""
         self._show_welcome()
         self.status.showMessage(t('ready'))
 
@@ -1408,13 +1612,20 @@ class DirTextApp(QMainWindow):
         self.status.showMessage(t('scanning', path=folder))
 
     def _on_item_progress(self, count):
-        self.progress_bar.setFormat(f'{count} items')
+        self._pending_progress = count
+        if not self._progress_timer.isActive():
+            self._progress_timer.start()
+
+    def _flush_progress(self):
+        self.progress_bar.setFormat(f'{self._pending_progress} items')
 
     def _on_scan_finished(self, lines, total_dirs, total_files):
         if not self._scanning:
             return
         self.structured_data = self._worker.structured_data if self._worker else []
         self._line_paths = self._worker._line_paths if self._worker else []
+        self._scan_total_dirs = total_dirs
+        self._scan_total_files = total_files
         self._worker = None
         self._set_scanning_state(False)
         self.progress_bar.setRange(0, 100)
@@ -1440,12 +1651,12 @@ class DirTextApp(QMainWindow):
 
     def _toggle_export_lang(self):
         self.export_lang = 'en' if self.export_lang == 'zh' else 'zh'
-        self.btn_export_lang.setText('EN' if self.export_lang == 'zh' else '中文')
+        self.btn_export_lang.setText('EN' if self.export_lang == 'en' else '中文')
 
     def _apply_theme(self):
         c = C
         self.setStyleSheet(f"QMainWindow {{ background: {c['bg']}; }}")
-        self.centralWidget().setStyleSheet(f"background: {c['bg']};")
+        self.centralWidget().setStyleSheet(f"#centralWidget {{ background: {c['bg']}; }}")
 
         btn_style = _make_btn_style(c)
         for btn in [self.btn_add, self.btn_clipboard, self.btn_clear,
@@ -1474,27 +1685,18 @@ class DirTextApp(QMainWindow):
         self._subtitle_label.setStyleSheet(
             f"font-size: 9pt; color: {c['fg2']}; background: transparent;")
 
-        self.preview.setStyleSheet(f"""
-            QPlainTextEdit {{
-                font-family: Consolas, 'Microsoft YaHei'; font-size: 11pt;
-                background: {c['surface']}; color: {c['fg']};
-                border: 1px solid {c['border']}; border-radius: 4px;
-                padding: 10px;
+        self.preview_frame.setStyleSheet(f"""
+            #previewFrame {{
+                border: 1px solid {c['border']};
+                border-radius: 4px;
+                background: {c['surface']};
             }}
-            QScrollBar:vertical {{
-                width: 7px; background: transparent; margin: 2px 2px 2px 0;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {c['scroll_handle']}; border-radius: 3px; min-height: 28px;
-            }}
-            QScrollBar::handle:vertical:hover {{
-                background: {c['scroll_handle_hover']};
-            }}
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {{ height: 0px; }}
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {{ background: none; }}
         """)
+        self._apply_preview_colors(c)
+        self._apply_preview_scrollbar(c)
+
+        self.preview_frame.update()
+        self.preview_frame.repaint()
 
         self.progress_bar.setStyleSheet(f"""
             QProgressBar {{
@@ -1525,6 +1727,65 @@ class DirTextApp(QMainWindow):
 
         self.status.setStyleSheet(f"color: {c['fg2']}; font-size: 9pt;")
 
+    def _apply_preview_colors(self, c):
+        p = QPalette()
+        p.setColor(QPalette.ColorRole.Base, QColor(c['surface']))
+        p.setColor(QPalette.ColorRole.Text, QColor(c['fg']))
+        p.setColor(QPalette.ColorRole.Window, QColor(c['surface']))
+        p.setColor(QPalette.ColorRole.WindowText, QColor(c['fg']))
+        p.setColor(QPalette.ColorRole.Highlight, QColor(c['accent']))
+        p.setColor(QPalette.ColorRole.HighlightedText, QColor('#ffffff'))
+        self.preview.setPalette(p)
+
+        self.preview.setStyleSheet(f"""
+            QPlainTextEdit {{
+                background: {c['surface']};
+                color: {c['fg']};
+                border: none;
+                font-family: Consolas, 'Microsoft YaHei';
+                font-size: 11pt;
+            }}
+        """)
+
+        self.preview.update()
+        self.preview.repaint()
+
+    def _apply_preview_scrollbar(self, c):
+        self.preview.verticalScrollBar().setStyleSheet(f"""
+            QScrollBar:vertical {{
+                width: 7px; background: transparent; margin: 2px 2px 2px 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {c['scroll_handle']}; border-radius: 3px; min-height: 28px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {c['scroll_handle_hover']};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{ height: 0px; }}
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{ background: none; }}
+        """)
+
+    def _apply_menu_style(self):
+        c = C
+        QApplication.instance().setStyleSheet(f"""
+            QMenu {{
+                background: {c['surface']}; color: {c['fg']};
+                border: 1px solid {c['border']}; padding: 4px 0;
+            }}
+            QMenu::item {{
+                padding: 5px 24px;
+            }}
+            QMenu::item:selected {{
+                background: {c['accent']}; color: white;
+            }}
+            QMenu::separator {{
+                height: 1px; background: {c['border']};
+                margin: 3px 10px;
+            }}
+        """)
+
     @staticmethod
     def _lerp_hex(a, b, t):
         ra, ga, ba = int(a[1:3], 16), int(a[3:5], 16), int(a[5:7], 16)
@@ -1533,33 +1794,58 @@ class DirTextApp(QMainWindow):
 
     def _theme_tick(self):
         t = min((time.perf_counter() - self._theme_t0) / 0.55, 1.0)
-        eased = 1.0 - (1.0 - t) ** 3
-        for k in C:
-            if k in self._theme_old_c and k in self._theme_new_c:
-                C[k] = self._lerp_hex(self._theme_old_c[k], self._theme_new_c[k], eased)
-        self._apply_theme()
         if t >= 1.0:
-            self._theme_timer.stop()
-            self._theme_timer.deleteLater()
+            C.update(self._theme_new_c)
             self._color_mode = self._theme_new_mode
             self.btn_theme.setText('☀️' if self._color_mode == 'dark' else '🌙')
             self.cfg['color_mode'] = self._color_mode
             self._save_config()
-            C.update(self._theme_new_c)
-            self._apply_theme()
+
             self._theme_animating = False
+
+            if hasattr(self, '_theme_timer') and self._theme_timer:
+                try:
+                    self._theme_timer.stop()
+                    self._theme_timer.timeout.disconnect()
+                    self._theme_timer.deleteLater()
+                except:
+                    pass
+                self._theme_timer = None
+
+            self._apply_theme()
+            self._apply_menu_style()
+        else:
+            eased = 1.0 - (1.0 - t) ** 3
+            for k in C:
+                if k in self._theme_old_c and k in self._theme_new_c:
+                    C[k] = self._lerp_hex(self._theme_old_c[k], self._theme_new_c[k], eased)
+            self._apply_theme()
 
     def _on_theme_toggle(self):
         if getattr(self, '_theme_animating', False):
             return
+
+        if hasattr(self, '_theme_timer') and self._theme_timer is not None:
+            try:
+                self._theme_timer.stop()
+                self._theme_timer.timeout.disconnect()
+            except:
+                pass
+            try:
+                self._theme_timer.deleteLater()
+            except:
+                pass
+            self._theme_timer = None
+
         self._theme_animating = True
         self._theme_new_mode = 'dark' if self._color_mode == 'light' else 'light'
         self._theme_old_c = dict(C)
         self._theme_new_c = dict(THEMES[self._theme_new_mode])
         self._theme_t0 = time.perf_counter()
+
         self._theme_timer = QTimer(self)
         self._theme_timer.timeout.connect(self._theme_tick)
-        self._theme_timer.start(16)
+        self._theme_timer.start(30)
 
     def _show_metadata_dialog(self):
         dlg = MetadataDialog(self, current_options=self.metadata_options)
@@ -1576,8 +1862,7 @@ class DirTextApp(QMainWindow):
                 self._scan()
 
     def export(self):
-        content = self.preview.toPlainText().strip()
-        if not content or content.startswith(t('welcome')[:20]):
+        if not self.structured_data and not self._full_preview_text:
             QMessageBox.warning(self, 'Warning', t('no_content'))
             return
 
@@ -1592,9 +1877,9 @@ class DirTextApp(QMainWindow):
         elif fmt_dlg.selected_format == 'json':
             self._export_json(timestamp)
         else:
-            self._export_txt(content, timestamp)
+            self._export_txt(timestamp)
 
-    def _export_txt(self, content, timestamp):
+    def _export_txt(self, timestamp):
         fname, _ = QFileDialog.getSaveFileName(
             self, t('save_title'),
             t('file_name', ts=timestamp),
@@ -1603,12 +1888,77 @@ class DirTextApp(QMainWindow):
         if not fname:
             return
         try:
+            el = self.export_lang
+            text = self._build_txt_content(el) if el != LANG else self._full_preview_text
             with open(fname, 'w', encoding='utf-8') as f:
-                f.write(content + f"\n\nGenerated: {datetime.now():%Y-%m-%d %H:%M:%S}")
+                f.write(text + f"\n\nGenerated: {datetime.now():%Y-%m-%d %H:%M:%S}")
             QMessageBox.information(self, 'Success', t('success', path=fname))
             self.status.showMessage(os.path.basename(fname))
+            self._open_export_folder(fname)
         except Exception as e:
             QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
+
+    def _build_txt_content(self, lang):
+        """Rebuild TXT content from scan data using the given language."""
+        sep = '═' * 80
+        lines = []
+        for i, folder in enumerate(self.folders):
+            lines.append(sep)
+            if lang == 'en':
+                lines.append(f"Folder [{i + 1}]: {folder}")
+            else:
+                lines.append(f"文件夹 [{i + 1}]：{folder}")
+            lines.append(sep)
+            self._build_tree_lines(folder, self.recursion_depth, 0, '', lang, lines)
+            lines.append('')
+        lines.append(sep)
+        if lang == 'en':
+            lines.append(f"Total: {len(self.folders)} folder(s)")
+            lines.append(f"         {self._scan_total_dirs} folders, {self._scan_total_files} files")
+        else:
+            lines.append(f"总计：{len(self.folders)} 个文件夹")
+            lines.append(f"         共 {self._scan_total_dirs} 个文件夹，{self._scan_total_files} 个文件")
+        return '\n'.join(lines)
+
+    def _build_tree_lines(self, folder, max_depth, current_depth, prefix, lang, lines):
+        """Recursively build tree lines for TXT export."""
+        try:
+            entries = sorted(os.scandir(folder), key=lambda e: e.name)
+            if self.ignore_patterns:
+                entries = [e for e in entries
+                           if not any(fnmatch.fnmatch(e.name, p)
+                                      for p in self.ignore_patterns)]
+        except PermissionError:
+            msg = '<Access denied>' if lang == 'en' else '<无法访问>'
+            lines.append(f"{prefix}└── {msg}")
+            return
+        except Exception as e:
+            lines.append(f"{prefix}└── <Error: {e}>")
+            return
+
+        for i, entry in enumerate(entries):
+            is_last = (i == len(entries) - 1)
+            connector = "└── " if is_last else "├── "
+            child_prefix = "    " if is_last else "│   "
+
+            if entry.is_dir():
+                lines.append(f"{prefix}{connector}{entry.name}/")
+                if max_depth == -1 or current_depth < max_depth:
+                    self._build_tree_lines(entry.path, max_depth, current_depth + 1,
+                                           prefix + child_prefix, lang, lines)
+            else:
+                lines.append(f"{prefix}{connector}{entry.name}")
+
+    @staticmethod
+    def _open_export_folder(fname):
+        folder = os.path.dirname(fname)
+        desktop = os.path.normpath(os.path.join(os.path.expanduser('~'), 'Desktop'))
+        if os.path.normpath(folder) == desktop:
+            SHCNE_UPDATEDIR = 0x00001000
+            SHCNF_PATHW = 0x0005
+            ctypes.windll.shell32.SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, folder, None)
+        else:
+            os.startfile(folder)
 
     def _export_csv(self, timestamp):
         fname, _ = QFileDialog.getSaveFileName(
@@ -1669,6 +2019,7 @@ class DirTextApp(QMainWindow):
                 success_msg += '\n\n' + t('csv_excel_hint')
             QMessageBox.information(self, 'Success', success_msg)
             self.status.showMessage(os.path.basename(fname))
+            self._open_export_folder(fname)
         except Exception as e:
             QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
         finally:
@@ -1729,6 +2080,7 @@ class DirTextApp(QMainWindow):
                 json.dump(export, f, ensure_ascii=False, indent=2)
             QMessageBox.information(self, 'Success', t('success', path=fname))
             self.status.showMessage(os.path.basename(fname))
+            self._open_export_folder(fname)
         except Exception as e:
             QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
         finally:
