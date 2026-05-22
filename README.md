@@ -1,4 +1,4 @@
-# DirText v3.9
+# DirText v4.0
 
 [![Release](https://img.shields.io/github/v/release/zcy83821448/DirText)](https://github.com/zcy83821448/DirText/releases)
 [![Platform](https://img.shields.io/badge/platform-Windows-blue.svg)](https://github.com/zcy83821448/DirText)
@@ -6,7 +6,7 @@
 
 > **English** | [中文说明](#中文说明)
 
-A lightweight Windows GUI tool that scans folder structures and exports them as **TXT tree text**, **CSV table**, **XLSX spreadsheet**, or **JSON structured data**.
+A lightweight Windows GUI tool that scans folder structures and exports them as **TXT tree text**, **CSV table**, **XLSX spreadsheet**, or **JSON structured data** — with support for **multi-format simultaneous export**.
 
 Built with PyQt6. Auto-detects system language (English / Chinese). No installation required.
 
@@ -20,7 +20,7 @@ Built with PyQt6. Auto-detects system language (English / Chinese). No installat
 | 🖱️ **Drag & Drop** | Drag any folder directly into the window — auto-scans on drop |
 | 📋 **Clipboard Auto-detect** | Automatically recognizes valid folder paths copied to clipboard on startup |
 | 🔍 **Recursion Depth Control** | Free text input for recursion depth. `0` = current level only, `-1` = all levels. 1-second debounce auto-scan |
-| 💾 **Export Format Selection** | Choose between **TXT** (tree text), **CSV** (table), **XLSX** (spreadsheet), **JSON** (structured data) before saving |
+| 💾 **Export Format Selection** | Choose between **TXT**, **CSV**, **XLSX**, **JSON** — or export **multiple formats at once** |
 | 📊 **Metadata Export** | Optional metadata for CSV/JSON/XLSX: file size, creation date, modification date, last access date |
 | 🌐 **Export Language Toggle** | Switch export content language (EN / 中文) independently from the UI language |
 | 📈 **Export Progress Bar** | Real-time progress bar for exports with status updates |
@@ -57,7 +57,7 @@ Built with PyQt6. Auto-detects system language (English / Chinese). No installat
 4. **Preview** the generated tree in real-time
 5. Use the **Search** box above the preview to find specific files
 6. Use **Filter** to narrow down results by date or size
-7. Click **"Export"** → choose **TXT / CSV / XLSX / JSON** → save with auto-generated timestamp
+7. Click **"Export"** → select one or more formats (**TXT / CSV / XLSX / JSON**) → save with auto-generated timestamp
 8. *(CSV/JSON/XLSX only)* Click **"Metadata"** to optionally include file size, creation, modification and access dates
 9. *(Optional)* Use the top-left **EN / 中文** toggle to change the export file language without affecting the UI
 10. *(Optional)* Click the **theme toggle** to switch between light and dark mode
@@ -99,6 +99,11 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 📝 Changelog
 
+### v4.0
+- **Multi-format Simultaneous Export** — Export to TXT, CSV, XLSX, and/or JSON in a single operation
+- **UI Optimizations** — Small UI improvements for a smoother experience
+- **Export Performance** — Faster and more efficient export processing
+
 ### v3.9
 - **Search** — Added a search box above the preview window to quickly find files
 - **Right-click to Copy Path** — Moved copy-path action from left-click to right-click context menu in the preview
@@ -137,7 +142,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 🏷️ Keywords / Tags
 
-`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `xlsx-export` `json-export` `metadata-export` `file-metadata` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop` `dark-mode` `ignore-patterns` `multi-threaded` `search` `filter`
+`directory-tree` `folder-structure` `file-listing` `export-to-text` `tree-generator` `folder-export` `directory-listing` `csv-export` `xlsx-export` `json-export` `metadata-export` `file-metadata` `pyqt6` `python` `gui` `desktop-application` `windows` `productivity` `utility` `developer-tools` `documentation` `file-manager` `drag-and-drop` `dark-mode` `ignore-patterns` `multi-threaded` `search` `filter` `batch-export` `multi-format`
 
 ---
 
@@ -151,9 +156,9 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 <a name="中文说明"></a>
 
-# DirText v3.9 中文说明
+# DirText v4.0 中文说明
 
-轻量级 Windows GUI 工具，扫描文件夹结构并导出为 **TXT 树形文本**、**CSV 表格**、**XLSX 电子表格** 或 **JSON 结构化数据**。
+轻量级 Windows GUI 工具，扫描文件夹结构并导出为 **TXT 树形文本**、**CSV 表格**、**XLSX 电子表格** 或 **JSON 结构化数据** — 支持 **多格式同时导出**。
 
 基于 PyQt6 构建，自动识别系统语言（英文/中文），无需安装，即开即用。
 
@@ -167,7 +172,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 | 🖱️ **拖拽支持** | 直接将文件夹拖入窗口任意区域，松开后自动添加并扫描 |
 | 📋 **剪贴板自动识别** | 启动时自动检测剪贴板中的有效文件夹路径 |
 | 🔍 **递归深度自由输入** | 文本框输入递归层数，`0` = 仅当前层，`-1` = 全部层级，输入停止后 1 秒自动触发扫描 |
-| 💾 **导出格式选择** | 导出前可选择 **TXT**（树形文本）、**CSV**（表格）、**XLSX**（电子表格）、**JSON**（结构化数据） |
+| 💾 **导出格式选择** | 可选择 **TXT**、**CSV**、**XLSX**、**JSON** — 或 **多格式同时导出** |
 | 📊 **元数据导出** | CSV/JSON/XLSX 可选导出文件大小、创建日期、修改日期、访问日期 |
 | 🌐 **导出语言切换** | 左上角切换导出文件语言（EN / 中文），不影响程序界面语言 |
 | 📈 **导出进度条** | 导出时底部显示精确进度条与状态提示 |
@@ -204,7 +209,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 4. **实时预览** 生成的目录树
 5. 使用预览区上方的 **搜索框** 快速查找文件
 6. 使用 **筛选** 功能按日期或大小范围过滤结果
-7. 点击 **"导出文本"** → 选择 **TXT / CSV / XLSX / JSON** → 自动带时间戳保存
+7. 点击 **"导出文本"** → 选择一个或多个格式（**TXT / CSV / XLSX / JSON**）→ 自动带时间戳保存
 8. *（CSV/JSON/XLSX 专属）* 点击 **"元数据"** 按钮，可选择附带文件大小、创建/修改/访问日期
 9. *（可选）* 点击左上角 **EN / 中文** 切换导出文件语言，不影响程序界面
 10. *（可选）* 点击 **主题切换按钮** 在深色/浅色模式间切换
@@ -245,6 +250,11 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 📝 更新日志
 
+### v4.0
+- **多格式同时导出** — 一次操作即可导出 TXT、CSV、XLSX、JSON 中的任意多种格式
+- **UI 优化** — 小幅 UI 改进，体验更流畅
+- **导出性能优化** — 导出处理更快更高效
+
 ### v3.9
 - **搜索** — 预览窗口上方新增搜索框，可直接搜索对应文件
 - **右键复制路径** — 左键点击复制路径功能废除，迁移至右键菜单
@@ -283,7 +293,7 @@ pyinstaller --onefile --windowed --icon=app.ico dirtext.py
 
 ## 🏷️ 关键词 / 标签
 
-`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `XLSX导出` `JSON导出` `元数据导出` `文件元数据` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持` `深色模式` `忽略规则` `多线程` `搜索` `筛选`
+`目录树` `文件夹结构` `文件列表` `导出文本` `树形生成器` `文件夹导出` `CSV导出` `XLSX导出` `JSON导出` `元数据导出` `文件元数据` `PyQt6` `Python` `GUI工具` `桌面应用` `Windows工具` `效率工具` `开发工具` `文档工具` `文件管理` `拖拽支持` `深色模式` `忽略规则` `多线程` `搜索` `筛选` `批量导出` `多格式导出`
 
 ---
 
