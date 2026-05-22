@@ -29,8 +29,10 @@ from PyQt6.QtWidgets import (
     QComboBox, QProgressBar, QHeaderView, QGraphicsOpacityEffect,
     QLineEdit, QCheckBox, QListWidget
 )
-from PyQt6.QtCore import Qt, QTimer, QSortFilterProxyModel, QDir, QPropertyAnimation, QEasingCurve, QPoint, pyqtSignal, QThread
+from PyQt6.QtCore import Qt, QTimer, QSortFilterProxyModel, QDir, QPropertyAnimation, QVariantAnimation, QEasingCurve, QPoint, pyqtSignal, QThread
 from PyQt6.QtGui import QColor, QFileSystemModel, QFont, QPalette
+from animations import TransitionManager, AnimatedButton
+from exporters import ExportFormatDialog, MetadataDialog, Exporter
 
 # ---------- 预览行数限制 / Preview Line Limit ----------
 PREVIEW_LINE_LIMIT = 5000
@@ -150,6 +152,7 @@ T = {
         'xlsx_file_name': 'file_list_{ts}.xlsx',
         'xlsx_no_module': 'This feature requires the openpyxl library.\n\nInstall it with:\npip install openpyxl',
         'format_xlsx': 'Excel File (.xlsx)',
+        'no_format_selected': 'Please select at least one format.',
         'filter_active': '● Filters active',
     },
     'zh': {
@@ -241,6 +244,7 @@ T = {
         'xlsx_file_name': '文件列表_{ts}.xlsx',
         'xlsx_no_module': '此功能需要 openpyxl 库。\n\n请使用以下命令安装：\npip install openpyxl',
         'format_xlsx': 'Excel 文件 (.xlsx)',
+        'no_format_selected': '请至少选择一种导出格式。',
         'filter_active': '● 筛选已激活',
     }
 }
@@ -437,108 +441,6 @@ class FolderSelectDialog(QDialog):
         if not self.selected_folders:
             self.selected_folders = [self.model.rootPath()]
         self.accept()
-
-
-# ---------- 统一动画管理器 / Unified Transition Manager ----------
-class TransitionManager:
-    """管理应用内所有属性动画的生命周期与资源。
-
-    - 持有运行中动画的强引用，防止 PyQt6 GC 回收导致动画中断
-    - 统一创建和回收 graphicsEffect，避免复用冲突
-    - 回调与链式衔接，无需硬编码延迟
-    """
-
-    def __init__(self):
-        self._running = set()  # 持有引用，阻止 GC 回收运行中的动画
-
-    def animate(self, target, prop_name, start_val, end_val,
-                duration=300, easing=None, on_finished=None):
-        """创建并启动一个受管理的属性动画，自动处理清理。"""
-        anim = QPropertyAnimation(target, prop_name)
-        anim.setDuration(duration)
-        anim.setStartValue(start_val)
-        anim.setEndValue(end_val)
-        if easing:
-            anim.setEasingCurve(easing)
-
-        self._running.add(anim)
-        anim.finished.connect(lambda a=anim, cb=on_finished: self._on_finished(a, cb))
-        anim.start()
-        return anim
-
-    def _on_finished(self, anim, callback=None):
-        self._running.discard(anim)
-        if callback:
-            callback()
-        anim.deleteLater()  # 断开信号连接，彻底释放 C++ 资源
-
-    def stop_target(self, target):
-        """停止作用于 target 对象的所有动画，并清理。"""
-        for anim in list(self._running):
-            try:
-                if anim.targetObject() is target:
-                    anim.stop()
-                    self._running.discard(anim)
-                    anim.deleteLater()
-            except RuntimeError:
-                self._running.discard(anim)
-
-    def stop_all(self):
-        """停止全部动画并清理。"""
-        for anim in self._running:
-            try:
-                anim.stop()
-            except RuntimeError:
-                pass
-        self._running.clear()
-
-
-# ---------- 交互动画按钮 / Animated Button ----------
-class AnimatedButton(QPushButton):
-    """带悬停高亮和按压反馈动画的按钮"""
-
-    _shared_tm = TransitionManager()
-
-    def __init__(self, text, parent=None):
-        super().__init__(text, parent)
-        self._effect = QGraphicsOpacityEffect(self)
-        self._effect.setOpacity(0.92)
-        self.setGraphicsEffect(self._effect)
-        self.destroyed.connect(self._cleanup_effect)
-
-    def _cleanup_effect(self):
-        if self._effect:
-            AnimatedButton._shared_tm.stop_target(self._effect)
-            self._effect.deleteLater()
-            self._effect = None
-
-    def enterEvent(self, event):
-        AnimatedButton._shared_tm.stop_target(self._effect)
-        AnimatedButton._shared_tm.animate(
-            self._effect, b"opacity", 0.92, 1.0, 180,
-            QEasingCurve.Type.OutCubic,
-        )
-        super().enterEvent(event)
-
-    def leaveEvent(self, event):
-        AnimatedButton._shared_tm.stop_target(self._effect)
-        AnimatedButton._shared_tm.animate(
-            self._effect, b"opacity", 1.0, 0.92, 180,
-            QEasingCurve.Type.OutCubic,
-        )
-        super().leaveEvent(event)
-
-    def mousePressEvent(self, event):
-        AnimatedButton._shared_tm.stop_target(self._effect)
-        self._effect.setOpacity(0.72)
-        super().mousePressEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        AnimatedButton._shared_tm.animate(
-            self._effect, b"opacity", 0.72, 1.0, 220,
-            QEasingCurve.Type.OutCubic,
-        )
-        super().mouseReleaseEvent(event)
 
 
 # ---------- 扫描工作线程 / Scan Worker Thread ----------
@@ -803,167 +705,6 @@ class ScanWorker(QThread):
 
 
 # ---------- 导出格式选择对话框 / Export Format Dialog ----------
-class FormatOption(QWidget):
-    toggled = pyqtSignal()
-
-    def __init__(self, text, parent=None):
-        super().__init__(parent)
-        self._selected = False
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 2, 0, 2)
-        layout.setSpacing(6)
-
-        self._circle = QLabel()
-        self._circle.setFixedWidth(16)
-        self._text = QLabel(text)
-        self._text.setStyleSheet(f"color: {C['fg']}; font-size: 10pt; background: transparent;")
-        layout.addWidget(self._circle)
-        layout.addWidget(self._text)
-        layout.addStretch()
-        self._update_circle()
-
-    def _update_circle(self):
-        if self._selected:
-            self._circle.setText(f'<span style="color: {C["accent_green"]}; font-size: 11pt;">●</span>')
-        else:
-            self._circle.setText(f'<span style="color: {C["option_circle"]}; font-size: 11pt;">○</span>')
-
-    def set_selected(self, v):
-        self._selected = v
-        self._update_circle()
-
-    def mousePressEvent(self, event):
-        if not self._selected:
-            self.set_selected(True)
-            self.toggled.emit()
-
-
-class ExportFormatDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.selected_format = 'txt'
-        self._setup_ui()
-
-    def _setup_ui(self):
-        self.setWindowTitle(t('export_format'))
-        self.setFixedSize(300, 235)
-        self.setStyleSheet(f"QDialog {{ background: {C['bg']}; }}")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 15, 20, 10)
-        layout.setSpacing(8)
-
-        prompt = QLabel(t('format_prompt'))
-        prompt.setStyleSheet(f"color: {C['fg']}; font-size: 10pt; background: transparent;")
-        layout.addWidget(prompt)
-
-        self.opt_txt = FormatOption(t('format_txt'))
-        self.opt_txt.set_selected(True)
-        self.opt_txt.toggled.connect(lambda: self._on_option_toggled('txt'))
-        layout.addWidget(self.opt_txt)
-
-        self.opt_csv = FormatOption(t('format_csv'))
-        self.opt_csv.toggled.connect(lambda: self._on_option_toggled('csv'))
-        layout.addWidget(self.opt_csv)
-
-        self.opt_json = FormatOption(t('format_json'))
-        self.opt_json.toggled.connect(lambda: self._on_option_toggled('json'))
-        layout.addWidget(self.opt_json)
-
-        self.opt_xlsx = FormatOption(t('format_xlsx'))
-        self.opt_xlsx.toggled.connect(lambda: self._on_option_toggled('xlsx'))
-        layout.addWidget(self.opt_xlsx)
-
-        layout.addSpacing(6)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        for text, slot in [('OK', self._accept), ('Cancel', self.reject)]:
-            btn = AnimatedButton(text)
-            btn.setStyleSheet(_make_btn_style(C))
-            btn.clicked.connect(slot)
-            btn_layout.addWidget(btn)
-        layout.addLayout(btn_layout)
-
-    def _on_option_toggled(self, fmt):
-        self.selected_format = fmt
-        self.opt_txt.set_selected(fmt == 'txt')
-        self.opt_csv.set_selected(fmt == 'csv')
-        self.opt_json.set_selected(fmt == 'json')
-        self.opt_xlsx.set_selected(fmt == 'xlsx')
-
-    def _accept(self):
-        self.accept()
-
-
-class MetadataDialog(QDialog):
-    def __init__(self, parent=None, current_options=None):
-        super().__init__(parent)
-        self.options = dict(current_options) if current_options else {
-            'size': False, 'created': False, 'modified': False, 'accessed': False,
-        }
-        self._setup_ui()
-
-    def _setup_ui(self):
-        self.setWindowTitle(t('metadata_title'))
-        self.setFixedSize(320, 280)
-        self.setStyleSheet(f"QDialog {{ background: {C['bg']}; }}")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 15, 20, 10)
-        layout.setSpacing(8)
-
-        prompt = QLabel(t('metadata_prompt'))
-        prompt.setStyleSheet(f"color: {C['fg']}; font-size: 10pt; background: transparent;")
-        layout.addWidget(prompt)
-
-        hint = QLabel(t('metadata_txt_hint'))
-        hint.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
-        hint.setWordWrap(True)
-        layout.addWidget(hint)
-
-        checkbox_style = f"color: {C['fg']}; font-size: 10pt; background: transparent;"
-
-        self.cb_size = QCheckBox(t('metadata_size'))
-        self.cb_size.setChecked(self.options.get('size', False))
-        self.cb_size.setStyleSheet(checkbox_style)
-        layout.addWidget(self.cb_size)
-
-        self.cb_created = QCheckBox(t('metadata_created'))
-        self.cb_created.setChecked(self.options.get('created', False))
-        self.cb_created.setStyleSheet(checkbox_style)
-        layout.addWidget(self.cb_created)
-
-        self.cb_modified = QCheckBox(t('metadata_modified'))
-        self.cb_modified.setChecked(self.options.get('modified', False))
-        self.cb_modified.setStyleSheet(checkbox_style)
-        layout.addWidget(self.cb_modified)
-
-        self.cb_accessed = QCheckBox(t('metadata_accessed'))
-        self.cb_accessed.setChecked(self.options.get('accessed', False))
-        self.cb_accessed.setStyleSheet(checkbox_style)
-        layout.addWidget(self.cb_accessed)
-
-        layout.addSpacing(6)
-
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        for text, slot in [('OK', self._accept), ('Cancel', self.reject)]:
-            btn = AnimatedButton(text)
-            btn.setStyleSheet(_make_btn_style(C))
-            btn.clicked.connect(slot)
-            btn_layout.addWidget(btn)
-        layout.addLayout(btn_layout)
-
-    def _accept(self):
-        self.options = {
-            'size': self.cb_size.isChecked(),
-            'created': self.cb_created.isChecked(),
-            'modified': self.cb_modified.isChecked(),
-            'accessed': self.cb_accessed.isChecked(),
-        }
-        self.accept()
-
 
 # ---------- 忽略列表对话框 / Ignore List Dialog ----------
 class IgnoreListDialog(QDialog):
@@ -1262,6 +1003,18 @@ class DirTextApp(QMainWindow):
             'size_min': '', 'size_max': '',
         }))
         self.export_lang = LANG
+        self.exporter = Exporter(
+            app=self,
+            t=t,
+            lang=LANG,
+            format_size=format_size,
+            format_timestamp=format_timestamp,
+            get_filtered_entries=self._get_filtered_entries,
+            get_structured_data=lambda: self.structured_data,
+            get_full_preview_text=lambda: self._full_preview_text,
+            get_scan_total_dirs=lambda: self._scan_total_dirs,
+            get_scan_total_files=lambda: self._scan_total_files,
+        )
         self._copy_tip = None
         self._depth_timer = QTimer(self)
         self._depth_timer.setSingleShot(True)
@@ -1308,11 +1061,9 @@ class DirTextApp(QMainWindow):
     # ----- 窗口事件 / Window Events -----
     def closeEvent(self, event):
         self._transition.stop_all()
-        if hasattr(self, '_theme_timer') and self._theme_timer:
+        if hasattr(self, '_theme_anim') and self._theme_anim:
             try:
-                self._theme_timer.stop()
-                self._theme_timer.timeout.disconnect()
-                self._theme_timer.deleteLater()
+                self._theme_anim.stop()
             except:
                 pass
         self.setWindowOpacity(1.0)
@@ -1393,12 +1144,12 @@ class DirTextApp(QMainWindow):
         self._setup_progress_bar(layout)
         self._setup_button_bar(layout)
         self._show_welcome()
+        self._apply_theme()
         self._apply_menu_style()
 
     def _setup_window(self):
         self.setWindowTitle(t('title'))
         self.setMinimumSize(780, 500)
-        self.setStyleSheet(f"QMainWindow {{ background: {C['bg']}; }}")
         self.setAcceptDrops(True)
 
         w, h = self.cfg.get('w', 900), self.cfg.get('h', 650)
@@ -1406,7 +1157,6 @@ class DirTextApp(QMainWindow):
 
         central = QWidget()
         central.setObjectName("centralWidget")
-        central.setStyleSheet(f"#centralWidget {{ background: {C['bg']}; }}")
         self.setCentralWidget(central)
 
     def _setup_header(self, layout):
@@ -1414,25 +1164,18 @@ class DirTextApp(QMainWindow):
         header_row.setSpacing(0)
 
         self.lbl_export_lang = QLabel(t('export_lang_label'))
-        self.lbl_export_lang.setStyleSheet(f"color: {C['fg2']}; font-size: 8pt; background: transparent;")
+        self.lbl_export_lang.setObjectName("lblExportLang")
         header_row.addWidget(self.lbl_export_lang)
 
         self.btn_export_lang = QPushButton('EN' if self.export_lang == 'en' else '中文')
+        self.btn_export_lang.setObjectName("btnExportLang")
         self.btn_export_lang.setFixedSize(46, 22)
-        self.btn_export_lang.setStyleSheet(f"""
-            QPushButton {{
-                font-size: 8pt; padding: 0px;
-                background: {C['surface']}; color: {C['fg2']};
-                border: 1px solid {C['border']}; border-radius: 3px;
-            }}
-            QPushButton:hover {{ color: {C['fg']}; border-color: {C['accent']}; }}
-        """)
         self.btn_export_lang.clicked.connect(self._toggle_export_lang)
         header_row.addWidget(self.btn_export_lang)
         header_row.addStretch()
 
         self._title_label = QLabel(t('header'))
-        self._title_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {C['fg']}; background: transparent;")
+        self._title_label.setObjectName("titleLabel")
         self._title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header_row.addWidget(self._title_label)
         header_row.addStretch()
@@ -1440,49 +1183,31 @@ class DirTextApp(QMainWindow):
         # theme toggle button (sun/moon)
         is_dark = self._color_mode == 'dark'
         self.btn_theme = QPushButton('☀️' if is_dark else '🌙')
+        self.btn_theme.setObjectName("btnTheme")
         self.btn_theme.setFixedSize(30, 28)
-        self.btn_theme.setStyleSheet(f"""
-            QPushButton {{
-                font-size: 14pt; padding: 0px; border: none; background: transparent;
-            }}
-            QPushButton:hover {{ background: {C['hover_bg']}; border-radius: 4px; }}
-        """)
         self.btn_theme.clicked.connect(self._on_theme_toggle)
         header_row.addWidget(self.btn_theme)
 
         layout.addLayout(header_row)
 
         self._subtitle_label = QLabel(t('subtitle'))
-        self._subtitle_label.setStyleSheet(f"font-size: 9pt; color: {C['fg2']}; background: transparent;")
+        self._subtitle_label.setObjectName("subtitleLabel")
         self._subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._subtitle_label)
 
     def _setup_search_bar(self, layout):
         self.search_input = QLineEdit()
+        self.search_input.setObjectName("searchInput")
         self.search_input.setPlaceholderText(t('search_placeholder'))
         self.search_input.setClearButtonEnabled(True)
-        self.search_input.setStyleSheet(f"""
-            QLineEdit {{
-                font-size: 10pt; padding: 5px 8px;
-                background: {C['surface']}; color: {C['fg']};
-                border: 1px solid {C['border']}; border-radius: 4px;
-            }}
-            QLineEdit:focus {{ border-color: {C['accent']}; }}
-        """)
         self.search_input.textChanged.connect(self._on_search_text_changed)
         layout.addWidget(self.search_input)
 
     def _setup_preview(self, layout):
         self.preview_frame = QWidget()
         self.preview_frame.setObjectName("previewFrame")
-        self.preview_frame.setStyleSheet(f"""
-            #previewFrame {{
-                border: 1px solid {C['border']}; border-radius: 4px;
-                background: {C['surface']};
-            }}
-        """)
         frame_layout = QVBoxLayout(self.preview_frame)
-        frame_layout.setContentsMargins(0, 0, 0, 0)
+        frame_layout.setContentsMargins(4, 4, 4, 4)
 
         self.preview = ClickablePreview()
         self.preview.setReadOnly(True)
@@ -1493,29 +1218,17 @@ class DirTextApp(QMainWindow):
         frame_layout.addWidget(self.preview)
         layout.addWidget(self.preview_frame, stretch=1)
 
-        self._preview_effect = QGraphicsOpacityEffect(self.preview)
-        self._preview_effect.setOpacity(1.0)
-        self.preview.setGraphicsEffect(self._preview_effect)
+        self._preview_effect = None  # created on-demand in _set_preview_text
 
     def _setup_progress_bar(self, layout):
         self.progress_bar = QProgressBar()
+        self.progress_bar.setObjectName("progressBar")
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
         self.progress_bar.setFormat('0 items')
         self.progress_bar.setFixedHeight(14)
         self.progress_bar.hide()
-        self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{
-                border: none; background: {C['progress_bg']};
-                border-radius: 7px; font-size: 8pt;
-                color: {C['fg']}; text-align: center;
-            }}
-            QProgressBar::chunk {{
-                background: {C['accent']};
-                border-radius: 7px;
-            }}
-        """)
         layout.addWidget(self.progress_bar)
 
     def _setup_button_bar(self, layout):
@@ -1524,32 +1237,32 @@ class DirTextApp(QMainWindow):
         btn_layout.addStretch()
 
         self.btn_add = AnimatedButton(t('add'))
-        self.btn_add.setStyleSheet(_make_btn_style(C))
+        self.btn_add.setObjectName("btnAdd")
         self.btn_add.clicked.connect(self.add_folder)
         btn_layout.addWidget(self.btn_add)
 
         self.btn_clipboard = AnimatedButton(t('clipboard_load'))
-        self.btn_clipboard.setStyleSheet(_make_btn_style(C))
+        self.btn_clipboard.setObjectName("btnClipboard")
         self.btn_clipboard.clicked.connect(self.load_from_clipboard)
         btn_layout.addWidget(self.btn_clipboard)
 
         self.btn_clear = AnimatedButton(t('clear'))
-        self.btn_clear.setStyleSheet(_make_btn_style(C))
+        self.btn_clear.setObjectName("btnClear")
         self.btn_clear.clicked.connect(self.clear)
         btn_layout.addWidget(self.btn_clear)
 
         self.btn_export = AnimatedButton(t('export'))
-        self.btn_export.setStyleSheet(_make_btn_style(C))
+        self.btn_export.setObjectName("btnExport")
         self.btn_export.clicked.connect(self.export)
         btn_layout.addWidget(self.btn_export)
 
         self.btn_metadata = AnimatedButton(t('metadata'))
-        self.btn_metadata.setStyleSheet(_make_btn_style(C))
+        self.btn_metadata.setObjectName("btnMetadata")
         self.btn_metadata.clicked.connect(self._show_metadata_dialog)
         btn_layout.addWidget(self.btn_metadata)
 
         self.btn_ignore = AnimatedButton(t('ignore_filter'))
-        self.btn_ignore.setStyleSheet(_make_btn_style(C))
+        self.btn_ignore.setObjectName("btnIgnore")
         self.btn_ignore.clicked.connect(self._show_ignore_dialog)
         btn_layout.addWidget(self.btn_ignore)
 
@@ -1557,43 +1270,40 @@ class DirTextApp(QMainWindow):
 
         # 递归深度输入 / Recursion depth input
         self._depth_prefix = QLabel(t('recursion_prefix'))
-        self._depth_prefix.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
+        self._depth_prefix.setObjectName("depthPrefix")
         btn_layout.addWidget(self._depth_prefix)
 
         self.depth_input = QLineEdit()
+        self.depth_input.setObjectName("depthInput")
         self.depth_input.setText('0')
         self.depth_input.setFixedWidth(38)
         self.depth_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.depth_input.setStyleSheet(f"""
-            QLineEdit {{
-                font-size: 9pt; padding: 2px 2px;
-                background: {C['surface']}; color: {C['fg']};
-                border: 1px solid {C['border']}; border-radius: 4px;
-            }}
-            QLineEdit:focus {{ border-color: {C['accent']}; }}
-        """)
         self.depth_input.textChanged.connect(self._on_depth_input)
         btn_layout.addWidget(self.depth_input)
 
         self._depth_suffix = QLabel(t('recursion_suffix'))
-        self._depth_suffix.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt; background: transparent;")
+        self._depth_suffix.setObjectName("depthSuffix")
         btn_layout.addWidget(self._depth_suffix)
 
         self._depth_hint = QLabel(t('recursion_hint'))
-        self._depth_hint.setStyleSheet(f"color: {C['fg2']}; font-size: 8pt; background: transparent;")
+        self._depth_hint.setObjectName("depthHint")
         btn_layout.addWidget(self._depth_hint)
 
         layout.addLayout(btn_layout)
 
         self.status = self.statusBar()
-        self.status.setStyleSheet(f"color: {C['fg2']}; font-size: 9pt;")
+        self.status.setObjectName("appStatusBar")
         self.status.showMessage(t('ready'))
         self.recursion_depth = 0
 
     # ----- 预览文本过渡 / Preview Text Transition -----
     def _set_preview_text(self, text, save_full=True):
         """预览文本淡入淡出：淡出 → 换文本 → 淡入。超过 PREVIEW_LINE_LIMIT 行则截断预览。"""
-        self._transition.stop_target(self._preview_effect)
+        # 移除旧的 graphics effect，让预览框正常显示父边框
+        if self._preview_effect:
+            self._transition.stop_target(self._preview_effect)
+        self.preview.setGraphicsEffect(None)
+        self._preview_effect = None
         if save_full:
             self._full_preview_text = text
         lines = text.split('\n')
@@ -1604,6 +1314,13 @@ class DirTextApp(QMainWindow):
                 notice = f"\n\n... 仅显示前 {PREVIEW_LINE_LIMIT} 行（共 {len(lines)} 行）— 导出可查看完整内容。"
             text = '\n'.join(lines[:PREVIEW_LINE_LIMIT]) + notice
         self._pending_text = text
+
+        # 创建临时 graphics effect 用于过渡动画，动画结束后移除
+        if self._preview_effect is None:
+            self._preview_effect = QGraphicsOpacityEffect(self.preview_frame)
+            self._preview_effect.setOpacity(1.0)
+            self.preview_frame.setGraphicsEffect(self._preview_effect)
+
         self._transition.animate(
             self._preview_effect, b"opacity", 1.0, 0.1, 100,
             QEasingCurve.Type.OutCubic,
@@ -1615,7 +1332,19 @@ class DirTextApp(QMainWindow):
         self._transition.animate(
             self._preview_effect, b"opacity", 0.1, 1.0, 100,
             QEasingCurve.Type.InCubic,
+            on_finished=self._remove_preview_effect,
         )
+
+    def _remove_preview_effect(self):
+        """淡入完成后移除 graphics effect，确保 frame 边框正常渲染。"""
+        if not self._preview_effect:
+            return
+        try:
+            self._transition.stop_target(self._preview_effect)
+        except RuntimeError:
+            pass
+        self.preview_frame.setGraphicsEffect(None)
+        self._preview_effect = None
 
     def _show_welcome(self):
         self._set_preview_text(t('welcome'))
@@ -1659,6 +1388,8 @@ class DirTextApp(QMainWindow):
         )
         tip.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         tip.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        tip.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        tip.setAutoFillBackground(False)
         tip.setStyleSheet(f"""
             QLabel {{
                 background: {C['surface']}; color: {C['fg']};
@@ -2050,88 +1781,94 @@ class DirTextApp(QMainWindow):
         self.export_lang = 'en' if self.export_lang == 'zh' else 'zh'
         self.btn_export_lang.setText('EN' if self.export_lang == 'en' else '中文')
 
-    def _apply_theme(self):
+    def _apply_theme(self, intermediate=False):
+        """应用主题样式：合并为单一 stylesheet，性能优化。
+
+        Args:
+            intermediate: 动画中间帧时跳过开销较大且视觉影响小的更新（menu、scrollbar）
+        """
         c = C
-        self.setStyleSheet(f"QMainWindow {{ background: {c['bg']}; }}")
-        self.centralWidget().setStyleSheet(f"#centralWidget {{ background: {c['bg']}; }}")
+        self.setStyleSheet(f"""
+            QMainWindow {{ background: {c['bg']}; }}
+            #centralWidget {{ background: {c['bg']}; }}
 
-        btn_style = _make_btn_style(c)
-        for btn in [self.btn_add, self.btn_clipboard, self.btn_clear,
-                     self.btn_export, self.btn_metadata, self.btn_ignore]:
-            btn.setStyleSheet(btn_style)
+            #titleLabel {{
+                font-size: 18px; font-weight: bold; color: {c['fg']};
+                background: transparent;
+            }}
+            #subtitleLabel {{
+                font-size: 9pt; color: {c['fg2']}; background: transparent;
+            }}
+            #lblExportLang {{
+                color: {c['fg2']}; font-size: 8pt; background: transparent;
+            }}
+            #depthPrefix, #depthSuffix {{
+                color: {c['fg2']}; font-size: 9pt; background: transparent;
+            }}
+            #depthHint {{
+                color: {c['fg2']}; font-size: 8pt; background: transparent;
+            }}
 
-        self.btn_export_lang.setStyleSheet(f"""
-            QPushButton {{
+            #btnExportLang {{
                 font-size: 8pt; padding: 0px;
                 background: {c['surface']}; color: {c['fg2']};
                 border: 1px solid {c['border']}; border-radius: 3px;
             }}
-            QPushButton:hover {{ color: {c['fg']}; border-color: {c['accent']}; }}
-        """)
-        self.btn_theme.setStyleSheet(f"""
-            QPushButton {{
+            #btnExportLang:hover {{ color: {c['fg']}; border-color: {c['accent']}; }}
+
+            #btnTheme {{
                 font-size: 14pt; padding: 0px; border: none; background: transparent;
             }}
-            QPushButton:hover {{ background: {c['hover_bg']}; border-radius: 4px; }}
-        """)
-        self.lbl_export_lang.setStyleSheet(
-            f"color: {c['fg2']}; font-size: 8pt; background: transparent;")
+            #btnTheme:hover {{ background: {c['hover_bg']}; border-radius: 4px; }}
 
-        self._title_label.setStyleSheet(
-            f"font-size: 18px; font-weight: bold; color: {c['fg']}; background: transparent;")
-        self._subtitle_label.setStyleSheet(
-            f"font-size: 9pt; color: {c['fg2']}; background: transparent;")
+            #btnAdd, #btnClipboard, #btnClear, #btnExport, #btnMetadata, #btnIgnore {{
+                font-family: 'Microsoft YaHei'; font-weight: bold; font-size: 10pt;
+                padding: 6px 20px; background: {c['surface']};
+                color: {c['fg']}; border: 1px solid {c['border']}; border-radius: 4px;
+            }}
+            #btnAdd:hover, #btnClipboard:hover, #btnClear:hover,
+            #btnExport:hover, #btnMetadata:hover, #btnIgnore:hover {{
+                background: {c['hover_bg']};
+            }}
+            #btnAdd:pressed, #btnClipboard:pressed, #btnClear:pressed,
+            #btnExport:pressed, #btnMetadata:pressed, #btnIgnore:pressed {{
+                background: {c['pressed_bg']};
+            }}
 
-        self.preview_frame.setStyleSheet(f"""
             #previewFrame {{
-                border: 1px solid {c['border']};
-                border-radius: 4px;
+                border: 1px solid {c['border']}; border-radius: 4px;
                 background: {c['surface']};
             }}
-        """)
-        self._apply_preview_colors(c)
-        self._apply_preview_scrollbar(c)
 
-        self.preview_frame.update()
-        self.preview_frame.repaint()
-
-        self.progress_bar.setStyleSheet(f"""
-            QProgressBar {{
+            #progressBar {{
                 border: none; background: {c['progress_bg']};
                 border-radius: 7px; font-size: 8pt;
                 color: {c['fg']}; text-align: center;
             }}
-            QProgressBar::chunk {{
+            #progressBar::chunk {{
                 background: {c['accent']}; border-radius: 7px;
             }}
-        """)
 
-        self.depth_input.setStyleSheet(f"""
-            QLineEdit {{
-                font-size: 9pt; padding: 2px 2px;
-                background: {c['surface']}; color: {c['fg']};
-                border: 1px solid {c['border']}; border-radius: 4px;
-            }}
-            QLineEdit:focus {{ border-color: {c['accent']}; }}
-        """)
-
-        self.search_input.setStyleSheet(f"""
-            QLineEdit {{
+            #searchInput {{
                 font-size: 10pt; padding: 5px 8px;
                 background: {c['surface']}; color: {c['fg']};
                 border: 1px solid {c['border']}; border-radius: 4px;
             }}
-            QLineEdit:focus {{ border-color: {c['accent']}; }}
+            #searchInput:focus {{ border-color: {c['accent']}; }}
+
+            #depthInput {{
+                font-size: 9pt; padding: 2px 2px;
+                background: {c['surface']}; color: {c['fg']};
+                border: 1px solid {c['border']}; border-radius: 4px;
+            }}
+            #depthInput:focus {{ border-color: {c['accent']}; }}
+
+            QStatusBar#appStatusBar {{ color: {c['fg2']}; font-size: 9pt; }}
         """)
-
-        self._depth_prefix.setStyleSheet(
-            f"color: {c['fg2']}; font-size: 9pt; background: transparent;")
-        self._depth_suffix.setStyleSheet(
-            f"color: {c['fg2']}; font-size: 9pt; background: transparent;")
-        self._depth_hint.setStyleSheet(
-            f"color: {c['fg2']}; font-size: 8pt; background: transparent;")
-
-        self.status.setStyleSheet(f"color: {c['fg2']}; font-size: 9pt;")
+        self._apply_preview_colors(c)
+        if not intermediate:
+            self._apply_preview_scrollbar(c)
+            self._apply_menu_style()
 
     def _apply_preview_colors(self, c):
         p = QPalette()
@@ -2142,7 +1879,6 @@ class DirTextApp(QMainWindow):
         p.setColor(QPalette.ColorRole.Highlight, QColor(c['accent']))
         p.setColor(QPalette.ColorRole.HighlightedText, QColor('#ffffff'))
         self.preview.setPalette(p)
-
         self.preview.setStyleSheet(f"""
             QPlainTextEdit {{
                 background: {c['surface']};
@@ -2152,9 +1888,6 @@ class DirTextApp(QMainWindow):
                 font-size: 11pt;
             }}
         """)
-
-        self.preview.update()
-        self.preview.repaint()
 
     def _apply_preview_scrollbar(self, c):
         self.preview.verticalScrollBar().setStyleSheet(f"""
@@ -2198,63 +1931,45 @@ class DirTextApp(QMainWindow):
         rb, gb, bb = int(b[1:3], 16), int(b[3:5], 16), int(b[5:7], 16)
         return f'#{int(ra+(rb-ra)*t):02x}{int(ga+(gb-ga)*t):02x}{int(ba+(bb-ba)*t):02x}'
 
-    def _theme_tick(self):
-        t = min((time.perf_counter() - self._theme_t0) / 0.55, 1.0)
-        if t >= 1.0:
-            C.update(self._theme_new_c)
-            self._color_mode = self._theme_new_mode
-            self.btn_theme.setText('☀️' if self._color_mode == 'dark' else '🌙')
-            self.cfg['color_mode'] = self._color_mode
-            self._save_config()
+    def _theme_tick(self, value):
+        """QVariantAnimation valueChanged 回调：value 为经 eased 后的 0~1 值。"""
+        for k in C:
+            if k in self._theme_old_c and k in self._theme_new_c:
+                C[k] = self._lerp_hex(self._theme_old_c[k], self._theme_new_c[k], value)
+        self._apply_theme(intermediate=True)
 
-            self._theme_animating = False
-
-            if hasattr(self, '_theme_timer') and self._theme_timer:
-                try:
-                    self._theme_timer.stop()
-                    self._theme_timer.timeout.disconnect()
-                    self._theme_timer.deleteLater()
-                except:
-                    pass
-                self._theme_timer = None
-
-            self._apply_theme()
-            self._apply_menu_style()
-        else:
-            eased = 1.0 - (1.0 - t) ** 3
-            for k in C:
-                if k in self._theme_old_c and k in self._theme_new_c:
-                    C[k] = self._lerp_hex(self._theme_old_c[k], self._theme_new_c[k], eased)
-            self._apply_theme()
+    def _theme_finished(self):
+        """动画完成：锁定最终颜色、保存配置、全量刷新。"""
+        C.update(self._theme_new_c)
+        self._color_mode = self._theme_new_mode
+        self.btn_theme.setText('☀️' if self._color_mode == 'dark' else '🌙')
+        self.cfg['color_mode'] = self._color_mode
+        self._save_config()
+        self._theme_animating = False
+        self._theme_anim = None
+        self._apply_theme(intermediate=False)
 
     def _on_theme_toggle(self):
         if getattr(self, '_theme_animating', False):
             return
 
-        if hasattr(self, '_theme_timer') and self._theme_timer is not None:
-            try:
-                self._theme_timer.stop()
-                self._theme_timer.timeout.disconnect()
-            except:
-                pass
-            try:
-                self._theme_timer.deleteLater()
-            except:
-                pass
-            self._theme_timer = None
-
         self._theme_animating = True
         self._theme_new_mode = 'dark' if self._color_mode == 'light' else 'light'
         self._theme_old_c = dict(C)
         self._theme_new_c = dict(THEMES[self._theme_new_mode])
-        self._theme_t0 = time.perf_counter()
 
-        self._theme_timer = QTimer(self)
-        self._theme_timer.timeout.connect(self._theme_tick)
-        self._theme_timer.start(30)
+        self._theme_anim = QVariantAnimation(self)
+        self._theme_anim.setDuration(550)
+        self._theme_anim.setStartValue(0.0)
+        self._theme_anim.setEndValue(1.0)
+        self._theme_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._theme_anim.valueChanged.connect(self._theme_tick)
+        self._theme_anim.finished.connect(self._theme_finished)
+        self._theme_anim.start()
 
     def _show_metadata_dialog(self):
-        dlg = MetadataDialog(self, current_options=self.metadata_options)
+        dlg = MetadataDialog(self, current_options=self.metadata_options,
+                             t=t, C=C, make_btn_style=_make_btn_style)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self.metadata_options = dlg.options
 
@@ -2274,427 +1989,21 @@ class DirTextApp(QMainWindow):
             QMessageBox.warning(self, 'Warning', t('no_content'))
             return
 
-        fmt_dlg = ExportFormatDialog(self)
+        fmt_dlg = ExportFormatDialog(self, t=t, C=C, make_btn_style=_make_btn_style)
         if fmt_dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-        if fmt_dlg.selected_format == 'csv':
-            self._export_csv(timestamp)
-        elif fmt_dlg.selected_format == 'json':
-            self._export_json(timestamp)
-        elif fmt_dlg.selected_format == 'xlsx':
-            self._export_xlsx(timestamp)
-        else:
-            self._export_txt(timestamp)
-
-    def _export_txt(self, timestamp):
-        fname, _ = QFileDialog.getSaveFileName(
-            self, t('save_title'),
-            t('file_name', ts=timestamp),
-            'Text files (*.txt);;All files (*.*)',
-        )
-        if not fname:
-            return
-        try:
-            el = self.export_lang
-            entries = self._get_filtered_entries()
-            if entries != self.structured_data:
-                text = self._build_txt_from_entries(entries, el)
-            elif el != LANG:
-                text = self._build_txt_content(el)
+        for fmt in fmt_dlg.selected_formats:
+            if fmt == 'csv':
+                self.exporter.export_csv(timestamp)
+            elif fmt == 'json':
+                self.exporter.export_json(timestamp)
+            elif fmt == 'xlsx':
+                self.exporter.export_xlsx(timestamp)
             else:
-                text = self._full_preview_text
-            with open(fname, 'w', encoding='utf-8') as f:
-                f.write(text + f"\n\nGenerated: {datetime.now():%Y-%m-%d %H:%M:%S}")
-            QMessageBox.information(self, 'Success', t('success', path=fname))
-            self.status.showMessage(os.path.basename(fname))
-            self._open_export_folder(fname)
-        except Exception as e:
-            QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
-
-    def _build_txt_content(self, lang):
-        """Rebuild TXT content from scan data using the given language."""
-        sep = '═' * 80
-        lines = []
-        for i, folder in enumerate(self.folders):
-            lines.append(sep)
-            if lang == 'en':
-                lines.append(f"Folder [{i + 1}]: {folder}")
-            else:
-                lines.append(f"文件夹 [{i + 1}]：{folder}")
-            lines.append(sep)
-            self._build_tree_lines(folder, self.recursion_depth, 0, '', lang, lines)
-            lines.append('')
-        lines.append(sep)
-        if lang == 'en':
-            lines.append(f"Total: {len(self.folders)} folder(s)")
-            lines.append(f"         {self._scan_total_dirs} folders, {self._scan_total_files} files")
-        else:
-            lines.append(f"总计：{len(self.folders)} 个文件夹")
-            lines.append(f"         共 {self._scan_total_dirs} 个文件夹，{self._scan_total_files} 个文件")
-        return '\n'.join(lines)
-
-    def _build_tree_lines(self, folder, max_depth, current_depth, prefix, lang, lines):
-        """Recursively build tree lines for TXT export."""
-        try:
-            entries = sorted(os.scandir(folder), key=lambda e: e.name)
-            if self.ignore_patterns:
-                entries = [e for e in entries
-                           if not any(fnmatch.fnmatch(e.name, p)
-                                      for p in self.ignore_patterns)]
-        except PermissionError:
-            msg = '<Access denied>' if lang == 'en' else '<无法访问>'
-            lines.append(f"{prefix}└── {msg}")
-            return
-        except Exception as e:
-            lines.append(f"{prefix}└── <Error: {e}>")
-            return
-
-        for i, entry in enumerate(entries):
-            is_last = (i == len(entries) - 1)
-            connector = "└── " if is_last else "├── "
-            child_prefix = "    " if is_last else "│   "
-
-            if entry.is_dir():
-                lines.append(f"{prefix}{connector}{entry.name}/")
-                if max_depth == -1 or current_depth < max_depth:
-                    self._build_tree_lines(entry.path, max_depth, current_depth + 1,
-                                           prefix + child_prefix, lang, lines)
-            else:
-                lines.append(f"{prefix}{connector}{entry.name}")
-
-    def _build_txt_from_entries(self, entries, lang):
-        """Build TXT content from a filtered list of entries, grouped by folder."""
-        sep = '═' * 80
-        lines = []
-        grouped = {}
-        for e in entries:
-            grouped.setdefault(e['folder'], []).append(e)
-
-        for i, folder in enumerate(self.folders):
-            if folder not in grouped:
-                continue
-            lines.append(sep)
-            if lang == 'en':
-                lines.append(f"Folder [{i + 1}]: {folder}")
-            else:
-                lines.append(f"文件夹 [{i + 1}]：{folder}")
-            lines.append(sep)
-
-            for entry in grouped[folder]:
-                try:
-                    rel = os.path.relpath(entry['path'], folder)
-                except ValueError:
-                    rel = entry['path']
-                if entry['type'] == 'dir':
-                    lines.append(f"  {rel}/")
-                else:
-                    lines.append(f"  {rel}")
-            lines.append('')
-
-        lines.append(sep)
-        total_dirs = sum(1 for e in entries if e['type'] == 'dir')
-        total_files = sum(1 for e in entries if e['type'] == 'file')
-        if lang == 'en':
-            lines.append(f"Total: {len(self.folders)} folder(s)")
-            lines.append(f"         {total_dirs} folders, {total_files} files")
-        else:
-            lines.append(f"总计：{len(self.folders)} 个文件夹")
-            lines.append(f"         共 {total_dirs} 个文件夹，{total_files} 个文件")
-        return '\n'.join(lines)
-
-    @staticmethod
-    def _open_export_folder(fname):
-        folder = os.path.dirname(fname)
-        desktop = os.path.normpath(os.path.join(os.path.expanduser('~'), 'Desktop'))
-        if os.path.normpath(folder) == desktop:
-            SHCNE_UPDATEDIR = 0x00001000
-            SHCNF_PATHW = 0x0005
-            ctypes.windll.shell32.SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, folder, None)
-        else:
-            os.startfile(folder)
-
-    def _export_csv(self, timestamp):
-        fname, _ = QFileDialog.getSaveFileName(
-            self, t('csv_save_title'),
-            t('csv_file_name', ts=timestamp),
-            'CSV files (*.csv);;All files (*.*)',
-        )
-        if not fname:
-            return
-        export_data = self._get_filtered_entries()
-        total = len(export_data)
-        self.progress_bar.setRange(0, total)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFormat(t('export_progress'))
-        self.progress_bar.show()
-        self.status.showMessage(t('exporting'))
-        el = self.export_lang
-        try:
-            with open(fname, 'w', encoding='utf-8-sig', newline='') as f:
-                writer = csv.writer(f)
-                meta = self.metadata_options
-                headers = [
-                    t('csv_col_folder', lang=el), t('csv_col_name', lang=el), t('csv_col_path', lang=el),
-                    t('csv_col_type', lang=el), t('csv_col_level', lang=el),
-                ]
-                if meta.get('size'):
-                    headers.append(t('csv_col_size', lang=el))
-                if meta.get('created'):
-                    headers.append(t('csv_col_created', lang=el))
-                if meta.get('modified'):
-                    headers.append(t('csv_col_modified', lang=el))
-                if meta.get('accessed'):
-                    headers.append(t('csv_col_accessed', lang=el))
-                writer.writerow(headers)
-
-                for i, entry in enumerate(export_data):
-                    row = [
-                        entry['folder'], entry['name'], entry['path'],
-                        t('csv_type_dir', lang=el) if entry['type'] == 'dir' else t('csv_type_file', lang=el),
-                        entry['level'],
-                    ]
-                    if meta.get('size'):
-                        if entry['type'] == 'file':
-                            row.append(f"{entry['size']} B")
-                        else:
-                            row.append('')
-                    if meta.get('created'):
-                        row.append(format_timestamp(entry['created']))
-                    if meta.get('modified'):
-                        row.append(format_timestamp(entry['modified']))
-                    if meta.get('accessed'):
-                        row.append(format_timestamp(entry['accessed']))
-                    writer.writerow(row)
-                    if i % 50 == 0:
-                        self.progress_bar.setValue(i + 1)
-                self.progress_bar.setValue(total)
-            success_msg = t('success', path=fname)
-            if any(meta.get(k) for k in ('created', 'modified', 'accessed')):
-                success_msg += '\n\n' + t('csv_excel_hint')
-            QMessageBox.information(self, 'Success', success_msg)
-            self.status.showMessage(os.path.basename(fname))
-            self._open_export_folder(fname)
-        except Exception as e:
-            QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
-        finally:
-            self.progress_bar.hide()
-
-    def _export_json(self, timestamp):
-        fname, _ = QFileDialog.getSaveFileName(
-            self, t('json_save_title'),
-            t('json_file_name', ts=timestamp),
-            'JSON files (*.json);;All files (*.*)',
-        )
-        if not fname:
-            return
-        export_data = self._get_filtered_entries()
-        total = len(export_data)
-        self.progress_bar.setRange(0, total)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFormat(t('export_progress'))
-        self.progress_bar.show()
-        self.status.showMessage(t('exporting'))
-        el = self.export_lang
-        try:
-            meta = self.metadata_options
-            data = []
-            for i, entry in enumerate(export_data):
-                item = {
-                    t('csv_col_folder', lang=el): entry['folder'],
-                    t('csv_col_name', lang=el): entry['name'],
-                    t('csv_col_path', lang=el): entry['path'],
-                    t('csv_col_type', lang=el): t('csv_type_dir', lang=el) if entry['type'] == 'dir' else t('csv_type_file', lang=el),
-                    t('csv_col_level', lang=el): entry['level'],
-                }
-                if meta.get('size'):
-                    item['size_bytes'] = entry['size'] if entry['type'] == 'file' else 0
-                    item['size'] = format_size(entry['size']) if entry['type'] == 'file' else '-'
-                if meta.get('created'):
-                    item['created'] = format_timestamp(entry['created'])
-                    item['created_timestamp'] = entry['created']
-                if meta.get('modified'):
-                    item['modified'] = format_timestamp(entry['modified'])
-                    item['modified_timestamp'] = entry['modified']
-                if meta.get('accessed'):
-                    item['accessed'] = format_timestamp(entry['accessed'])
-                    item['accessed_timestamp'] = entry['accessed']
-                data.append(item)
-                if i % 50 == 0:
-                    self.progress_bar.setValue(i + 1)
-            self.progress_bar.setValue(total)
-
-            export = {
-                'export_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'folders': self.folders,
-                'total_folders': len(self.folders),
-                'total_dirs': sum(1 for e in export_data if e['type'] == 'dir'),
-                'total_files': sum(1 for e in export_data if e['type'] == 'file'),
-                'entries': data,
-            }
-            with open(fname, 'w', encoding='utf-8') as f:
-                json.dump(export, f, ensure_ascii=False, indent=2)
-            QMessageBox.information(self, 'Success', t('success', path=fname))
-            self.status.showMessage(os.path.basename(fname))
-            self._open_export_folder(fname)
-        except Exception as e:
-            QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
-        finally:
-            self.progress_bar.hide()
-
-    def _export_xlsx(self, timestamp):
-        try:
-            from openpyxl import Workbook
-            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side, numbers
-            from openpyxl.utils import get_column_letter
-        except ImportError:
-            QMessageBox.critical(self, 'Error', t('xlsx_no_module'))
-            return
-
-        fname, _ = QFileDialog.getSaveFileName(
-            self, t('xlsx_save_title'),
-            t('xlsx_file_name', ts=timestamp),
-            'Excel files (*.xlsx);;All files (*.*)',
-        )
-        if not fname:
-            return
-
-        export_data = self._get_filtered_entries()
-        total = len(export_data)
-        self.progress_bar.setRange(0, total)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setFormat(t('export_progress'))
-        self.progress_bar.show()
-        self.status.showMessage(t('exporting'))
-        el = self.export_lang
-
-        try:
-            wb = Workbook()
-            ws = wb.active
-            ws.title = 'File List'
-
-            # Styles
-            header_font = Font(name='Microsoft YaHei', bold=True, color='FFFFFF', size=10)
-            header_fill = PatternFill(start_color='007AFF', end_color='007AFF', fill_type='solid')
-            header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-            cell_alignment = Alignment(vertical='center')
-            thin_border = Border(
-                left=Side(style='thin', color='D1D1D6'),
-                right=Side(style='thin', color='D1D1D6'),
-                top=Side(style='thin', color='D1D1D6'),
-                bottom=Side(style='thin', color='D1D1D6'),
-            )
-            header_border = Border(
-                left=Side(style='thin', color='0066CC'),
-                right=Side(style='thin', color='0066CC'),
-                top=Side(style='thin', color='0066CC'),
-                bottom=Side(style='thin', color='0066CC'),
-            )
-
-            # Headers
-            meta = self.metadata_options
-            headers = [
-                t('csv_col_folder', lang=el), t('csv_col_name', lang=el), t('csv_col_path', lang=el),
-                t('csv_col_type', lang=el), t('csv_col_level', lang=el),
-            ]
-            if meta.get('size'):
-                headers.append(t('csv_col_size', lang=el))
-            if meta.get('created'):
-                headers.append(t('csv_col_created', lang=el))
-            if meta.get('modified'):
-                headers.append(t('csv_col_modified', lang=el))
-            if meta.get('accessed'):
-                headers.append(t('csv_col_accessed', lang=el))
-
-            for col_idx, header in enumerate(headers, 1):
-                cell = ws.cell(row=1, column=col_idx, value=header)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = header_alignment
-                cell.border = header_border
-
-            # Determine column layout for date formatting
-            date_col_indices = {}
-            next_col = 6  # column 6 = first metadata column
-            if meta.get('size'):
-                next_col += 1
-            if meta.get('created'):
-                date_col_indices['created'] = next_col
-                next_col += 1
-            if meta.get('modified'):
-                date_col_indices['modified'] = next_col
-                next_col += 1
-            if meta.get('accessed'):
-                date_col_indices['accessed'] = next_col
-                next_col += 1
-
-            for i, entry in enumerate(export_data):
-                row = i + 2
-                row_data = [
-                    entry['folder'], entry['name'], entry['path'],
-                    t('csv_type_dir', lang=el) if entry['type'] == 'dir' else t('csv_type_file', lang=el),
-                    entry['level'],
-                ]
-                if meta.get('size'):
-                    if entry['type'] == 'file':
-                        row_data.append(f"{entry['size']} B")
-                    else:
-                        row_data.append('')
-                if meta.get('created'):
-                    ts = entry['created']
-                    row_data.append(datetime.fromtimestamp(ts) if ts else '')
-                if meta.get('modified'):
-                    ts = entry['modified']
-                    row_data.append(datetime.fromtimestamp(ts) if ts else '')
-                if meta.get('accessed'):
-                    ts = entry['accessed']
-                    row_data.append(datetime.fromtimestamp(ts) if ts else '')
-
-                for col_idx, value in enumerate(row_data, 1):
-                    cell = ws.cell(row=row, column=col_idx, value=value)
-                    cell.alignment = cell_alignment
-                    cell.border = thin_border
-                    cell.font = Font(name='Microsoft YaHei', size=10)
-                    if col_idx in date_col_indices.values() and isinstance(value, datetime):
-                        cell.number_format = 'YYYY-MM-DD HH:MM:SS'
-
-                if i % 50 == 0:
-                    self.progress_bar.setValue(i + 1)
-
-            # Auto-fit column widths
-            for col_cells in ws.columns:
-                max_length = 0
-                col_letter = get_column_letter(col_cells[0].column)
-                for cell in col_cells:
-                    if cell.value:
-                        max_length = max(max_length, len(str(cell.value)))
-                ws.column_dimensions[col_letter].width = min(max_length + 3, 65)
-
-            # Freeze first row
-            ws.freeze_panes = 'A2'
-
-            # Auto filter
-            ws.auto_filter.ref = ws.dimensions
-
-            # Zebra striping for data rows
-            zebra_fill = PatternFill(start_color='F5F5F7', end_color='F5F5F7', fill_type='solid')
-            for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
-                if row[0].row % 2 == 0:
-                    for cell in row:
-                        cell.fill = zebra_fill
-
-            self.progress_bar.setValue(total)
-            wb.save(fname)
-
-            QMessageBox.information(self, 'Success', t('success', path=fname))
-            self.status.showMessage(os.path.basename(fname))
-            self._open_export_folder(fname)
-        except Exception as e:
-            QMessageBox.critical(self, 'Error', t('fail', error=str(e)))
-        finally:
-            self.progress_bar.hide()
+                self.exporter.export_txt(timestamp)
 
 
 # ---------- 入口 / Entry Point ----------
